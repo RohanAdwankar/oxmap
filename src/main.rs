@@ -238,6 +238,8 @@ struct GraphFile {
 #[derive(Default, Serialize, Deserialize)]
 struct AppConfig {
     editor_command: Option<String>,
+    monocolor: Option<bool>,
+    movement_speed: Option<f32>,
 }
 
 enum Mode {
@@ -273,6 +275,8 @@ struct App {
     command_buffer: String,
     status: String,
     editor_command: String,
+    monocolor: bool,
+    movement_speed: f32,
     loaded_path: Option<PathBuf>,
     dirty: bool,
     should_quit: bool,
@@ -383,6 +387,8 @@ impl App {
             command_buffer: String::new(),
             status: "a add  f<key> select  m f <key> relate  : commands".into(),
             editor_command: env::var("EDITOR").unwrap_or_else(|_| "vi".into()),
+            monocolor: false,
+            movement_speed: 2.0,
             loaded_path: None,
             dirty: false,
             should_quit: false,
@@ -729,7 +735,7 @@ impl App {
             (bottom - top) as u16,
         );
 
-        let border_style = Style::default().fg(note.color.ratatui());
+        let border_style = Style::default().fg(self.note_color(note));
         if selected {
             for x in rect.x..rect.x + rect.width {
                 let top = buf.cell_mut((x, rect.y)).expect("top border");
@@ -755,7 +761,7 @@ impl App {
                     if selected {
                         Style::default()
                             .fg(Color::Black)
-                            .bg(note.color.ratatui())
+                            .bg(self.note_color(note))
                             .add_modifier(Modifier::BOLD)
                     } else {
                         border_style
@@ -809,7 +815,7 @@ impl App {
         let idx = cy as usize * area.width as usize + cx as usize;
         let cluster = &mut clusters[idx];
         cluster.count += 1;
-        cluster.color = cluster.color.or(Some(note.color.ratatui()));
+        cluster.color = cluster.color.or(Some(self.note_color(note)));
         cluster.selected |= selected;
     }
 
@@ -961,15 +967,16 @@ impl App {
 
     fn apply_motion(&mut self, dx: f32, dy: f32, count: u16) {
         let repeat = max(1, count as i32) as f32;
+        let step = self.movement_speed * repeat;
         if let Some(selected) = self.selected {
             let note = &mut self.notes[selected];
-            note.x += dx * repeat;
-            note.y += dy * repeat;
+            note.x += dx * step;
+            note.y += dy * step;
             self.dirty = true;
-            self.status = format!("moved [{}] by {},{}", note.key, dx * repeat, dy * repeat);
+            self.status = format!("moved [{}] by {},{}", note.key, dx * step, dy * step);
         } else {
-            self.camera_x += (dx * 4.0 * repeat) / self.zoom;
-            self.camera_y += (dy * 2.5 * repeat) / self.zoom;
+            self.camera_x += (dx * 4.0 * step) / self.zoom;
+            self.camera_y += (dy * 2.5 * step) / self.zoom;
         }
     }
 
@@ -1259,6 +1266,12 @@ impl App {
         if let Some(editor) = config.editor_command {
             self.editor_command = editor;
         }
+        if let Some(monocolor) = config.monocolor {
+            self.monocolor = monocolor;
+        }
+        if let Some(movement_speed) = config.movement_speed {
+            self.movement_speed = movement_speed.max(0.1);
+        }
         Ok(())
     }
 
@@ -1270,10 +1283,20 @@ impl App {
         }
         let config = AppConfig {
             editor_command: Some(self.editor_command.clone()),
+            monocolor: Some(self.monocolor),
+            movement_speed: Some(self.movement_speed),
         };
         fs::write(&path, serde_json::to_string_pretty(&config)?)
             .with_context(|| format!("failed to write {}", path.display()))?;
         Ok(())
+    }
+
+    fn note_color(&self, note: &Note) -> Color {
+        if self.monocolor {
+            Color::White
+        } else {
+            note.color.ratatui()
+        }
     }
 
     fn next_key(&self) -> Option<char> {
