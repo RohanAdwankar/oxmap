@@ -253,6 +253,12 @@ struct SavedPoint {
     y: f32,
 }
 
+#[derive(Clone, Copy, Deserialize)]
+struct OxPointView {
+    x: f32,
+    y: f32,
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct AppConfig {
     editor_command: Option<String>,
@@ -1342,8 +1348,12 @@ impl App {
         }
         let screen_points: Vec<(i32, i32)> = route
             .iter()
+            .filter_map(ox_point_components)
             .map(|point| self.project_point(point.x, point.y, area))
             .collect();
+        if screen_points.len() < 2 {
+            return;
+        }
         draw_polyline(
             buf,
             area,
@@ -1367,20 +1377,15 @@ impl App {
                 node.height = note.h;
             }
         }
+        let mut node_overrides = HashMap::new();
+        for note in &self.notes {
+            node_overrides.insert(
+                note.key.to_string(),
+                make_ox_point(note.x + note.w / 2.0, note.y + note.h / 2.0)?,
+            );
+        }
         let overrides = OxLayoutOverrides {
-            nodes: self
-                .notes
-                .iter()
-                .map(|note| {
-                    (
-                        note.key.to_string(),
-                        OxPoint {
-                            x: note.x + note.w / 2.0,
-                            y: note.y + note.h / 2.0,
-                        },
-                    )
-                })
-                .collect(),
+            nodes: node_overrides,
             ..OxLayoutOverrides::default()
         };
         Some(diagram.layout(Some(&overrides)).ok()?.final_routes)
@@ -1615,7 +1620,6 @@ fn draw_polyline(buf: &mut Buffer, area: Rect, points: &[(i32, i32)], glyph: cha
     }
 }
 
-
 fn inset(area: Rect, margin: u16) -> Rect {
     let horizontal = margin.saturating_mul(2);
     let vertical = margin.saturating_mul(2);
@@ -1704,4 +1708,14 @@ fn split_saved_label(label: &str) -> (String, String) {
 
 fn temp_note_markdown_path(key: char) -> PathBuf {
     env::temp_dir().join(format!("oxmap2-node-{key}.md"))
+}
+
+fn ox_point_components(point: &OxPoint) -> Option<OxPointView> {
+    serde_json::to_value(point)
+        .ok()
+        .and_then(|value| serde_json::from_value(value).ok())
+}
+
+fn make_ox_point(x: f32, y: f32) -> Option<OxPoint> {
+    serde_json::from_value(serde_json::json!({ "x": x, "y": y })).ok()
 }

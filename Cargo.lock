@@ -1218,6 +1218,8 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "oxdraw"
 version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "218fa272b3ef69c5a066b5d09096fb1c203bd78c898202338adcf7efc98b6e04"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1228,12 +1230,10 @@ dependencies = [
  "reqwest",
  "resvg",
  "serde",
- "serde-wasm-bindgen",
  "serde_json",
  "thiserror",
  "tiny-skia",
  "walkdir",
- "wasm-bindgen",
 ]
 
 [[package]]
@@ -1640,17 +1640,6 @@ checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
  "serde_derive",
-]
-
-[[package]]
-name = "serde-wasm-bindgen"
-version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8302e169f0eddcc139c70f139d19d6467353af16f9fce27e8c30158036a1e16b"
-dependencies = [
- "js-sys",
- "serde",
- "wasm-bindgen",
 ]
 
 [[package]]
