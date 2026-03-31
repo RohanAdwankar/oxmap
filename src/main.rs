@@ -181,27 +181,21 @@ impl RelationType {
         }
     }
 
-    fn tip(self, from_start: bool) -> char {
+    fn tip(self, from_start: bool, dx: i32, dy: i32) -> char {
         match self {
             Self::Directional => {
                 if from_start {
                     ' '
                 } else {
-                    '▶'
+                    arrow_glyph(dx, dy)
                 }
             }
-            Self::Bidirectional => {
-                if from_start {
-                    '◀'
-                } else {
-                    '▶'
-                }
-            }
+            Self::Bidirectional => arrow_glyph(dx, dy),
             Self::Compositional => {
                 if from_start {
                     '◆'
                 } else {
-                    '▶'
+                    arrow_glyph(dx, dy)
                 }
             }
             Self::Cluster => '◌',
@@ -1362,9 +1356,23 @@ impl App {
             Style::default().fg(Color::DarkGray),
         );
         let start = screen_points[0];
+        let start_next = screen_points[1];
         let end = *screen_points.last().expect("route has at least 2 points");
-        self.draw_tip(area, buf, start.0, start.1, relation_kind.tip(true));
-        self.draw_tip(area, buf, end.0, end.1, relation_kind.tip(false));
+        let end_prev = screen_points[screen_points.len() - 2];
+        self.draw_tip(
+            area,
+            buf,
+            start.0,
+            start.1,
+            relation_kind.tip(true, start_next.0 - start.0, start_next.1 - start.1),
+        );
+        self.draw_tip(
+            area,
+            buf,
+            end.0,
+            end.1,
+            relation_kind.tip(false, end.0 - end_prev.0, end.1 - end_prev.1),
+        );
     }
 
     fn compute_oxdraw_routes(&self) -> Option<HashMap<String, Vec<OxPoint>>> {
@@ -1718,4 +1726,12 @@ fn ox_point_components(point: &OxPoint) -> Option<OxPointView> {
 
 fn make_ox_point(x: f32, y: f32) -> Option<OxPoint> {
     serde_json::from_value(serde_json::json!({ "x": x, "y": y })).ok()
+}
+
+fn arrow_glyph(dx: i32, dy: i32) -> char {
+    if dx.abs() >= dy.abs() {
+        if dx >= 0 { '▶' } else { '◀' }
+    } else {
+        if dy >= 0 { '▼' } else { '▲' }
+    }
 }
