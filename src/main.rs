@@ -19,8 +19,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::symbols::border;
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
 use serde::{Deserialize, Serialize};
 
@@ -56,7 +55,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>, args: Arg
 
     loop {
         terminal.draw(|frame| {
-            app.last_canvas = inset(frame.area(), 1);
+            app.last_canvas = content_area(frame.area());
             app.render(frame.area(), frame.buffer_mut());
         })?;
 
@@ -236,6 +235,11 @@ struct GraphFile {
     editor_command: Option<String>,
 }
 
+#[derive(Default, Serialize, Deserialize)]
+struct AppConfig {
+    editor_command: Option<String>,
+}
+
 enum Mode {
     Normal,
     AwaitSelect,
@@ -278,6 +282,7 @@ struct App {
 impl App {
     fn load(args: Args) -> Result<Self> {
         let mut app = Self::demo();
+        app.load_config()?;
         app.loaded_path = args.path.clone();
         if let Some(path) = args.path {
             app.load_from_path(&path)?;
@@ -619,6 +624,7 @@ impl App {
                     self.status = format!("editor {}", self.editor_command);
                 } else {
                     self.editor_command = value.into();
+                    self.save_config()?;
                     self.dirty = true;
                     self.status = format!("editor set to {}", self.editor_command);
                 }
@@ -630,96 +636,58 @@ impl App {
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        Block::default()
-            .borders(Borders::ALL)
-            .border_set(border::THICK)
-            .title(" Note Graph ")
-            .title_bottom(Line::from(
-                " a add  f select  i edit  o open  m link  s/d zoom  : command ",
-            ))
-            .render(area, buf);
-
-        let canvas = inset(area, 1);
+        let canvas = content_area(area);
         if canvas.width < 4 || canvas.height < 4 {
             return;
         }
 
         fill_area(buf, canvas, ' ', Style::default().bg(Color::Black));
-        self.render_grid(canvas, buf);
         self.render_relations(canvas, buf);
         self.render_notes(canvas, buf);
         self.render_status(canvas, buf);
-        self.render_command_bar(area, buf);
         self.render_edit_overlay(area, buf);
     }
 
-    fn render_grid(&self, area: Rect, buf: &mut Buffer) {
-        let world_step = 10.0;
-        if self.zoom * world_step < 4.0 {
-            return;
-        }
-
-        let left_world = self.camera_x - (area.width as f32 / self.zoom) / 2.0;
-        let top_world = self.camera_y - (area.height as f32 / self.zoom) / 2.0;
-        let first_x = (left_world / world_step).floor() as i32 - 1;
-        let first_y = (top_world / world_step).floor() as i32 - 1;
-
-        for gx in first_x..first_x + 64 {
-            let world_x = gx as f32 * world_step;
-            let sx = ((world_x - self.camera_x) * self.zoom + area.width as f32 / 2.0).round();
-            let x = area.x as i32 + sx as i32;
-            if x < area.x as i32 || x >= (area.x + area.width) as i32 {
-                continue;
-            }
-            for y in area.y..area.y + area.height {
-                let cell = buf.cell_mut((x as u16, y)).expect("grid cell in bounds");
-                if cell.symbol() == " " {
-                    cell.set_char('·')
-                        .set_style(Style::default().fg(Color::DarkGray));
-                }
-            }
-        }
-
-        for gy in first_y..first_y + 64 {
-            let world_y = gy as f32 * world_step;
-            let sy = ((world_y - self.camera_y) * self.zoom + area.height as f32 / 2.0).round();
-            let y = area.y as i32 + sy as i32;
-            if y < area.y as i32 || y >= (area.y + area.height) as i32 {
-                continue;
-            }
-            for x in area.x..area.x + area.width {
-                let cell = buf.cell_mut((x, y as u16)).expect("grid cell in bounds");
-                if cell.symbol() == " " {
-                    cell.set_char('·')
-                        .set_style(Style::default().fg(Color::DarkGray));
-                }
-            }
-        }
-    }
-
     fn render_relations(&self, area: Rect, buf: &mut Buffer) {
+        let projected: Vec<ProjectedNode> = self
+            .notes
+            .iter()
+            .map(|note| ProjectedNode {
+                key: note.key,
+                rect: self.project_rect(note, area),
+            })
+            .collect();
+
         for relation in &self.relations {
-            let Some(from) = self.node_by_key(relation.from) else {
+            let Some(from) = projected.iter().find(|node| node.key == relation.from) else {
                 continue;
             };
-            let Some(to) = self.node_by_key(relation.to) else {
+            let Some(to) = projected.iter().find(|node| node.key == relation.to) else {
                 continue;
             };
 
-            let (x0, y0) = self.project_point(from.x + from.w / 2.0, from.y + from.h / 2.0, area);
-            let (x1, y1) = self.project_point(to.x + to.w / 2.0, to.y + to.h / 2.0, area);
-            draw_line(
+            let route = route_relation(from.rect, to.rect, &projected);
+            draw_polyline(
                 buf,
                 area,
-                x0,
-                y0,
-                x1,
-                y1,
+                &route.points,
                 relation.kind.stroke(),
                 Style::default().fg(Color::DarkGray),
             );
-            self.draw_tip(area, buf, x0, y0, relation.kind.tip(true));
-            self.draw_tip(area, buf, x1, y1, relation.kind.tip(false));
+            self.draw_tip(
+                area,
+                buf,
+                route.start_tip.0,
+                route.start_tip.1,
+                relation.kind.tip(true),
+            );
+            self.draw_tip(
+                area,
+                buf,
+                route.end_tip.0,
+                route.end_tip.1,
+                relation.kind.tip(false),
+            );
         }
     }
 
@@ -761,21 +729,68 @@ impl App {
             (bottom - top) as u16,
         );
 
-        let mut border_style = Style::default().fg(note.color.ratatui());
+        let border_style = Style::default().fg(note.color.ratatui());
         if selected {
-            border_style = border_style
-                .add_modifier(Modifier::BOLD)
-                .bg(Color::DarkGray);
+            for x in rect.x..rect.x + rect.width {
+                let top = buf.cell_mut((x, rect.y)).expect("top border");
+                if top.symbol() != " " {
+                    top.set_style(top.style().add_modifier(Modifier::BOLD));
+                }
+                let bottom = buf
+                    .cell_mut((x, rect.y + rect.height - 1))
+                    .expect("bottom border");
+                if bottom.symbol() != " " {
+                    bottom.set_style(bottom.style().add_modifier(Modifier::BOLD));
+                }
+            }
         }
 
         Block::default()
             .borders(Borders::ALL)
             .border_style(border_style)
-            .title(Line::styled(
-                format!(" {} [{}] ", note.title, note.key),
-                border_style,
-            ))
+            .title(Line::from(vec![
+                Span::styled(format!(" {} ", note.title), border_style),
+                Span::styled(
+                    format!("[{}]", note.key),
+                    if selected {
+                        Style::default()
+                            .fg(Color::Black)
+                            .bg(note.color.ratatui())
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        border_style
+                    },
+                ),
+                Span::raw(" "),
+            ]))
             .render(rect, buf);
+
+        if selected {
+            for x in rect.x..rect.x + rect.width {
+                let top = buf.cell_mut((x, rect.y)).expect("top border");
+                if top.symbol() != " " {
+                    top.set_style(top.style().add_modifier(Modifier::BOLD));
+                }
+                let bottom = buf
+                    .cell_mut((x, rect.y + rect.height - 1))
+                    .expect("bottom border");
+                if bottom.symbol() != " " {
+                    bottom.set_style(bottom.style().add_modifier(Modifier::BOLD));
+                }
+            }
+            for y in rect.y..rect.y + rect.height {
+                let left = buf.cell_mut((rect.x, y)).expect("left border");
+                if left.symbol() != " " {
+                    left.set_style(left.style().add_modifier(Modifier::BOLD));
+                }
+                let right = buf
+                    .cell_mut((rect.x + rect.width - 1, y))
+                    .expect("right border");
+                if right.symbol() != " " {
+                    right.set_style(right.style().add_modifier(Modifier::BOLD));
+                }
+            }
+        }
 
         let inner = inset(rect, 1);
         if inner.width > 0 && inner.height > 0 {
@@ -829,49 +844,32 @@ impl App {
         let selection = self
             .selected
             .and_then(|idx| self.notes.get(idx))
-            .map(|note| format!(" selected [{}] {}", note.key, note.title))
-            .unwrap_or_else(|| " pan mode".into());
-        let status = format!(
-            "zoom {:.2}x  camera ({:.0}, {:.0}){}{}",
-            self.zoom,
-            self.camera_x,
-            self.camera_y,
-            selection,
-            if self.dirty { "  *dirty" } else { "" }
-        );
-        let width = min(status.chars().count() as u16 + 2, area.width);
-        let status_area = Rect::new(area.x, area.y, width, 1);
-        fill_area(
-            buf,
-            status_area,
-            ' ',
-            Style::default().bg(Color::DarkGray).fg(Color::White),
-        );
-        buf.set_string(
-            area.x + 1,
-            area.y,
-            status,
-            Style::default().bg(Color::DarkGray).fg(Color::White),
-        );
+            .map(|note| format!("sel [{}] {}", note.key, note.title))
+            .unwrap_or_else(|| "pan".into());
 
         let mode = match &self.mode {
             Mode::Normal => self.status.as_str(),
             Mode::AwaitSelect => "awaiting node key",
-            Mode::AwaitRelationPrefix(kind) => match kind {
-                RelationType::Directional => "relation: press f then target key",
-                _ => "typed relation: press f then target key",
-            },
-            Mode::AwaitRelationTarget(kind) => match kind {
-                RelationType::Directional => "relation target",
-                RelationType::Bidirectional => "bidirectional target",
-                RelationType::Compositional => "compositional target",
-                RelationType::Cluster => "cluster target",
-            },
+            Mode::AwaitRelationPrefix(_) => "relation: press f then target key",
+            Mode::AwaitRelationTarget(kind) => kind.label(),
             Mode::Edit(state) => match state.field {
                 EditField::Title => "edit title  tab body  esc done",
                 EditField::Body => "edit body  tab title  esc done",
             },
-            Mode::Command => "command mode",
+            Mode::Command => "",
+        };
+        let status = if matches!(self.mode, Mode::Command) {
+            format!(":{}_", self.command_buffer)
+        } else {
+            format!(
+                "{}  zoom {:.2}x  camera ({:.0}, {:.0})  {}{}",
+                mode,
+                self.zoom,
+                self.camera_x,
+                self.camera_y,
+                selection,
+                if self.dirty { "  *dirty" } else { "" }
+            )
         };
         let mode_y = area.y + area.height.saturating_sub(1);
         fill_area(
@@ -883,31 +881,9 @@ impl App {
         buf.set_string(
             area.x + 1,
             mode_y,
-            mode,
+            status,
             Style::default().bg(Color::DarkGray).fg(Color::White),
         );
-    }
-
-    fn render_command_bar(&self, area: Rect, buf: &mut Buffer) {
-        if !matches!(self.mode, Mode::Command) {
-            return;
-        }
-        let width = min(area.width.saturating_sub(4), 60);
-        let rect = Rect::new(area.x + 2, area.y + area.height.saturating_sub(3), width, 3);
-        Clear.render(rect, buf);
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Command ")
-            .render(rect, buf);
-        let inner = inset(rect, 1);
-        if inner.width > 0 {
-            buf.set_string(
-                inner.x,
-                inner.y,
-                format!(":{}", self.command_buffer),
-                Style::default(),
-            );
-        }
     }
 
     fn render_edit_overlay(&self, area: Rect, buf: &mut Buffer) {
@@ -1114,10 +1090,6 @@ impl App {
         value
     }
 
-    fn node_by_key(&self, key: char) -> Option<&Note> {
-        self.notes.iter().find(|note| note.key == key)
-    }
-
     fn open_selected_in_editor(
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
@@ -1199,6 +1171,7 @@ impl App {
             EnableMouseCapture
         )?;
         enable_raw_mode()?;
+        terminal.clear()?;
         if !status.success() {
             return Err(anyhow!("external command failed: {command}"));
         }
@@ -1274,6 +1247,35 @@ impl App {
         Ok(())
     }
 
+    fn load_config(&mut self) -> Result<()> {
+        let path = config_path()?;
+        if !path.exists() {
+            return Ok(());
+        }
+        let data = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        let config: AppConfig =
+            serde_json::from_str(&data).context("failed to parse app config")?;
+        if let Some(editor) = config.editor_command {
+            self.editor_command = editor;
+        }
+        Ok(())
+    }
+
+    fn save_config(&self) -> Result<()> {
+        let path = config_path()?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+        let config = AppConfig {
+            editor_command: Some(self.editor_command.clone()),
+        };
+        fs::write(&path, serde_json::to_string_pretty(&config)?)
+            .with_context(|| format!("failed to write {}", path.display()))?;
+        Ok(())
+    }
+
     fn next_key(&self) -> Option<char> {
         let used: Vec<char> = self.notes.iter().map(|note| note.key).collect();
         ('a'..='z')
@@ -1314,11 +1316,54 @@ struct ProjectedRect {
     h: i32,
 }
 
+impl ProjectedRect {
+    fn left(self) -> i32 {
+        self.x
+    }
+
+    fn right(self) -> i32 {
+        self.x + self.w - 1
+    }
+
+    fn top(self) -> i32 {
+        self.y
+    }
+
+    fn bottom(self) -> i32 {
+        self.y + self.h - 1
+    }
+
+    fn center(self) -> (i32, i32) {
+        (self.x + self.w / 2, self.y + self.h / 2)
+    }
+
+    fn expand(self, padding: i32) -> Self {
+        Self {
+            x: self.x - padding,
+            y: self.y - padding,
+            w: self.w + padding * 2,
+            h: self.h + padding * 2,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Default)]
 struct Cluster {
     count: u16,
     color: Option<Color>,
     selected: bool,
+}
+
+#[derive(Clone, Copy)]
+struct ProjectedNode {
+    key: char,
+    rect: ProjectedRect,
+}
+
+struct RoutedRelation {
+    points: Vec<(i32, i32)>,
+    start_tip: (i32, i32),
+    end_tip: (i32, i32),
 }
 
 fn parse_mermaid_graph(source: &str) -> Result<GraphFile> {
@@ -1393,6 +1438,13 @@ fn draw_line(
     glyph: char,
     style: Style,
 ) {
+    let glyph = if x0 == x1 {
+        '|'
+    } else if y0 == y1 {
+        glyph
+    } else {
+        glyph
+    };
     let mut x = x0;
     let mut y = y0;
     let dx = (x1 - x0).abs();
@@ -1425,6 +1477,194 @@ fn draw_line(
     }
 }
 
+fn draw_polyline(buf: &mut Buffer, area: Rect, points: &[(i32, i32)], glyph: char, style: Style) {
+    for pair in points.windows(2) {
+        let [(x0, y0), (x1, y1)] = [pair[0], pair[1]];
+        let segment_glyph = if x0 == x1 { '|' } else { glyph };
+        draw_line(buf, area, x0, y0, x1, y1, segment_glyph, style);
+    }
+}
+
+fn route_relation(
+    from: ProjectedRect,
+    to: ProjectedRect,
+    nodes: &[ProjectedNode],
+) -> RoutedRelation {
+    let from_center = from.center();
+    let to_center = to.center();
+    let horizontal = (to_center.0 - from_center.0).abs() >= (to_center.1 - from_center.1).abs();
+
+    let (_start_anchor, start_tip, _end_anchor, end_tip, mid) = if horizontal {
+        if to_center.0 >= from_center.0 {
+            let start_anchor = (
+                from.right(),
+                clamp_i32(to_center.1, from.top() + 1, from.bottom() - 1),
+            );
+            let end_anchor = (
+                to.left(),
+                clamp_i32(from_center.1, to.top() + 1, to.bottom() - 1),
+            );
+            let lane = find_vertical_lane(
+                (start_anchor.0 + end_anchor.0) / 2,
+                start_anchor,
+                end_anchor,
+                nodes,
+            );
+            (
+                start_anchor,
+                (start_anchor.0 + 1, start_anchor.1),
+                end_anchor,
+                (end_anchor.0 - 1, end_anchor.1),
+                (lane, end_anchor.1),
+            )
+        } else {
+            let start_anchor = (
+                from.left(),
+                clamp_i32(to_center.1, from.top() + 1, from.bottom() - 1),
+            );
+            let end_anchor = (
+                to.right(),
+                clamp_i32(from_center.1, to.top() + 1, to.bottom() - 1),
+            );
+            let lane = find_vertical_lane(
+                (start_anchor.0 + end_anchor.0) / 2,
+                start_anchor,
+                end_anchor,
+                nodes,
+            );
+            (
+                start_anchor,
+                (start_anchor.0 - 1, start_anchor.1),
+                end_anchor,
+                (end_anchor.0 + 1, end_anchor.1),
+                (lane, end_anchor.1),
+            )
+        }
+    } else if to_center.1 >= from_center.1 {
+        let start_anchor = (
+            clamp_i32(to_center.0, from.left() + 1, from.right() - 1),
+            from.bottom(),
+        );
+        let end_anchor = (
+            clamp_i32(from_center.0, to.left() + 1, to.right() - 1),
+            to.top(),
+        );
+        let lane = find_horizontal_lane(
+            (start_anchor.1 + end_anchor.1) / 2,
+            start_anchor,
+            end_anchor,
+            nodes,
+        );
+        (
+            start_anchor,
+            (start_anchor.0, start_anchor.1 + 1),
+            end_anchor,
+            (end_anchor.0, end_anchor.1 - 1),
+            (end_anchor.0, lane),
+        )
+    } else {
+        let start_anchor = (
+            clamp_i32(to_center.0, from.left() + 1, from.right() - 1),
+            from.top(),
+        );
+        let end_anchor = (
+            clamp_i32(from_center.0, to.left() + 1, to.right() - 1),
+            to.bottom(),
+        );
+        let lane = find_horizontal_lane(
+            (start_anchor.1 + end_anchor.1) / 2,
+            start_anchor,
+            end_anchor,
+            nodes,
+        );
+        (
+            start_anchor,
+            (start_anchor.0, start_anchor.1 - 1),
+            end_anchor,
+            (end_anchor.0, end_anchor.1 + 1),
+            (end_anchor.0, lane),
+        )
+    };
+
+    let points = if horizontal {
+        vec![
+            start_tip,
+            (mid.0, start_tip.1),
+            mid,
+            (mid.0, end_tip.1),
+            end_tip,
+        ]
+    } else {
+        vec![
+            start_tip,
+            (start_tip.0, mid.1),
+            mid,
+            (end_tip.0, mid.1),
+            end_tip,
+        ]
+    };
+
+    RoutedRelation {
+        points,
+        start_tip,
+        end_tip,
+    }
+}
+
+fn find_vertical_lane(
+    preferred: i32,
+    start: (i32, i32),
+    end: (i32, i32),
+    nodes: &[ProjectedNode],
+) -> i32 {
+    let min_x = min(start.0, end.0);
+    let max_x = max(start.0, end.0);
+    for delta in 0..24 {
+        for candidate in [preferred + delta, preferred - delta] {
+            if nodes.iter().all(|node| {
+                let rect = node.rect.expand(1);
+                !(candidate >= rect.left()
+                    && candidate <= rect.right()
+                    && horizontal_segment_hits_rect(start.1, min_x, max_x, rect))
+            }) {
+                return candidate;
+            }
+        }
+    }
+    preferred
+}
+
+fn find_horizontal_lane(
+    preferred: i32,
+    start: (i32, i32),
+    end: (i32, i32),
+    nodes: &[ProjectedNode],
+) -> i32 {
+    let min_y = min(start.1, end.1);
+    let max_y = max(start.1, end.1);
+    for delta in 0..24 {
+        for candidate in [preferred + delta, preferred - delta] {
+            if nodes.iter().all(|node| {
+                let rect = node.rect.expand(1);
+                !(candidate >= rect.top()
+                    && candidate <= rect.bottom()
+                    && vertical_segment_hits_rect(start.0, min_y, max_y, rect))
+            }) {
+                return candidate;
+            }
+        }
+    }
+    preferred
+}
+
+fn horizontal_segment_hits_rect(y: i32, x0: i32, x1: i32, rect: ProjectedRect) -> bool {
+    y >= rect.top() && y <= rect.bottom() && x1 >= rect.left() && x0 <= rect.right()
+}
+
+fn vertical_segment_hits_rect(x: i32, y0: i32, y1: i32, rect: ProjectedRect) -> bool {
+    x >= rect.left() && x <= rect.right() && y1 >= rect.top() && y0 <= rect.bottom()
+}
+
 fn inset(area: Rect, margin: u16) -> Rect {
     let horizontal = margin.saturating_mul(2);
     let vertical = margin.saturating_mul(2);
@@ -1450,9 +1690,28 @@ fn fill_area(buf: &mut Buffer, area: Rect, ch: char, style: Style) {
     }
 }
 
+fn content_area(area: Rect) -> Rect {
+    if area.height <= 1 {
+        area
+    } else {
+        Rect::new(area.x, area.y, area.width, area.height - 1)
+    }
+}
+
 fn shell_quote(path: &Path) -> String {
     let raw = path.display().to_string();
     format!("'{}'", raw.replace('\'', "'\\''"))
+}
+
+fn config_path() -> Result<PathBuf> {
+    if let Ok(dir) = env::var("XDG_CONFIG_HOME") {
+        return Ok(PathBuf::from(dir).join("oxmap2").join("config.json"));
+    }
+    let home = env::var("HOME").context("HOME is not set")?;
+    Ok(PathBuf::from(home)
+        .join(".config")
+        .join("oxmap2")
+        .join("config.json"))
 }
 
 fn move_cursor(state: &mut EditState, delta: isize, len: usize) {
@@ -1462,6 +1721,14 @@ fn move_cursor(state: &mut EditState, delta: isize, len: usize) {
     };
     let next = (*cursor as isize + delta).clamp(0, len as isize);
     *cursor = next as usize;
+}
+
+fn clamp_i32(value: i32, min_value: i32, max_value: i32) -> i32 {
+    if min_value > max_value {
+        value
+    } else {
+        value.clamp(min_value, max_value)
+    }
 }
 
 fn slugify(title: &str) -> String {
