@@ -15,6 +15,11 @@ use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
+use oxdraw::{
+    Diagram as OxDiagram, Edge as OxEdge, EdgeArrowDirection as OxArrowDirection,
+    EdgeKind as OxEdgeKind, LayoutOverrides as OxLayoutOverrides, Point as OxPoint,
+    edge_identifier,
+};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::buffer::Buffer;
@@ -668,45 +673,16 @@ impl App {
     }
 
     fn render_relations(&self, area: Rect, buf: &mut Buffer) {
-        let projected: Vec<ProjectedNode> = self
-            .notes
-            .iter()
-            .map(|note| ProjectedNode {
-                key: note.key,
-                rect: self.project_rect(note, area),
-            })
-            .collect();
-
+        let Some(routes) = self.compute_oxdraw_routes() else {
+            return;
+        };
         for relation in &self.relations {
-            let Some(from) = projected.iter().find(|node| node.key == relation.from) else {
+            let edge = relation_to_oxdraw_edge(relation);
+            let edge_id = edge_identifier(&edge);
+            let Some(route) = routes.get(&edge_id) else {
                 continue;
             };
-            let Some(to) = projected.iter().find(|node| node.key == relation.to) else {
-                continue;
-            };
-
-            let route = route_relation(from.rect, to.rect, &projected);
-            draw_polyline(
-                buf,
-                area,
-                &route.points,
-                relation.kind.stroke(),
-                Style::default().fg(Color::DarkGray),
-            );
-            self.draw_tip(
-                area,
-                buf,
-                route.start_tip.0,
-                route.start_tip.1,
-                relation.kind.tip(true),
-            );
-            self.draw_tip(
-                area,
-                buf,
-                route.end_tip.0,
-                route.end_tip.1,
-                relation.kind.tip(false),
-            );
+            self.draw_oxdraw_route(area, buf, route, relation.kind);
         }
     }
 
@@ -1221,22 +1197,7 @@ impl App {
     }
 
     fn to_mmd(&self) -> String {
-        let mut out = String::from("graph LR\n");
-        for note in &self.notes {
-            out.push_str(&format!(
-                "    {}[\"{}\"]\n",
-                note.key,
-                escape_mermaid(&note_markdown_label(note))
-            ));
-        }
-        for relation in &self.relations {
-            out.push_str(&format!(
-                "    {} {} {}\n",
-                relation.from,
-                relation.kind.mermaid_operator(),
-                relation.to
-            ));
-        }
+        let out = self.to_mermaid_definition();
         let layout = SavedLayoutOverrides {
             nodes: self
                 .notes
@@ -1253,6 +1214,26 @@ impl App {
                 .collect(),
         };
         merge_mmd_and_layout(&out, &layout).unwrap_or(out)
+    }
+
+    fn to_mermaid_definition(&self) -> String {
+        let mut out = String::from("graph LR\n");
+        for note in &self.notes {
+            out.push_str(&format!(
+                "    {}[\"{}\"]\n",
+                note.key,
+                escape_mermaid(&note_markdown_label(note))
+            ));
+        }
+        for relation in &self.relations {
+            out.push_str(&format!(
+                "    {} {} {}\n",
+                relation.from,
+                relation.kind.mermaid_operator(),
+                relation.to
+            ));
+        }
+        out
     }
 
     fn quit_requested(&mut self, force: bool) -> Result<()> {
@@ -1348,6 +1329,62 @@ impl App {
             .set_char(glyph)
             .set_style(Style::default().fg(Color::Gray));
     }
+
+    fn draw_oxdraw_route(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        route: &[OxPoint],
+        relation_kind: RelationType,
+    ) {
+        if route.len() < 2 {
+            return;
+        }
+        let screen_points: Vec<(i32, i32)> = route
+            .iter()
+            .map(|point| self.project_point(point.x, point.y, area))
+            .collect();
+        draw_polyline(
+            buf,
+            area,
+            &screen_points,
+            relation_kind.stroke(),
+            Style::default().fg(Color::DarkGray),
+        );
+        let start = screen_points[0];
+        let end = *screen_points.last().expect("route has at least 2 points");
+        self.draw_tip(area, buf, start.0, start.1, relation_kind.tip(true));
+        self.draw_tip(area, buf, end.0, end.1, relation_kind.tip(false));
+    }
+
+    fn compute_oxdraw_routes(&self) -> Option<HashMap<String, Vec<OxPoint>>> {
+        let definition = self.to_mermaid_definition();
+        let mut diagram = OxDiagram::parse(&definition).ok()?;
+        for note in &self.notes {
+            let id = note.key.to_string();
+            if let Some(node) = diagram.nodes.get_mut(&id) {
+                node.width = note.w;
+                node.height = note.h;
+            }
+        }
+        let overrides = OxLayoutOverrides {
+            nodes: self
+                .notes
+                .iter()
+                .map(|note| {
+                    (
+                        note.key.to_string(),
+                        OxPoint {
+                            x: note.x + note.w / 2.0,
+                            y: note.y + note.h / 2.0,
+                        },
+                    )
+                })
+                .collect(),
+            ..OxLayoutOverrides::default()
+        };
+        Some(diagram.layout(Some(&overrides)).ok()?.final_routes)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1358,54 +1395,11 @@ struct ProjectedRect {
     h: i32,
 }
 
-impl ProjectedRect {
-    fn left(self) -> i32 {
-        self.x
-    }
-
-    fn right(self) -> i32 {
-        self.x + self.w - 1
-    }
-
-    fn top(self) -> i32 {
-        self.y
-    }
-
-    fn bottom(self) -> i32 {
-        self.y + self.h - 1
-    }
-
-    fn center(self) -> (i32, i32) {
-        (self.x + self.w / 2, self.y + self.h / 2)
-    }
-
-    fn expand(self, padding: i32) -> Self {
-        Self {
-            x: self.x - padding,
-            y: self.y - padding,
-            w: self.w + padding * 2,
-            h: self.h + padding * 2,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Default)]
 struct Cluster {
     count: u16,
     color: Option<Color>,
     selected: bool,
-}
-
-#[derive(Clone, Copy)]
-struct ProjectedNode {
-    key: char,
-    rect: ProjectedRect,
-}
-
-struct RoutedRelation {
-    points: Vec<(i32, i32)>,
-    start_tip: (i32, i32),
-    end_tip: (i32, i32),
 }
 
 fn parse_mermaid_graph(source: &str) -> Result<GraphFile> {
@@ -1483,6 +1477,22 @@ fn parse_saved_mmd(source: &str) -> Result<GraphFile> {
         note.body = body;
     }
     Ok(graph)
+}
+
+fn relation_to_oxdraw_edge(relation: &Relation) -> OxEdge {
+    let (kind, arrow) = match relation.kind {
+        RelationType::Directional => (OxEdgeKind::Solid, OxArrowDirection::Forward),
+        RelationType::Bidirectional => (OxEdgeKind::Solid, OxArrowDirection::Both),
+        RelationType::Compositional => (OxEdgeKind::Thick, OxArrowDirection::Forward),
+        RelationType::Cluster => (OxEdgeKind::Dashed, OxArrowDirection::None),
+    };
+    OxEdge {
+        from: relation.from.to_string(),
+        to: relation.to.to_string(),
+        label: None,
+        kind,
+        arrow,
+    }
 }
 
 fn draw_line(
@@ -1605,185 +1615,6 @@ fn draw_polyline(buf: &mut Buffer, area: Rect, points: &[(i32, i32)], glyph: cha
     }
 }
 
-fn route_relation(
-    from: ProjectedRect,
-    to: ProjectedRect,
-    nodes: &[ProjectedNode],
-) -> RoutedRelation {
-    let from_center = from.center();
-    let to_center = to.center();
-    let horizontal = (to_center.0 - from_center.0).abs() >= (to_center.1 - from_center.1).abs();
-
-    let (_start_anchor, start_tip, _end_anchor, end_tip, mid) = if horizontal {
-        if to_center.0 >= from_center.0 {
-            let start_anchor = (
-                from.right(),
-                clamp_i32(to_center.1, from.top() + 1, from.bottom() - 1),
-            );
-            let end_anchor = (
-                to.left(),
-                clamp_i32(from_center.1, to.top() + 1, to.bottom() - 1),
-            );
-            let lane = find_vertical_lane(
-                (start_anchor.0 + end_anchor.0) / 2,
-                start_anchor,
-                end_anchor,
-                nodes,
-            );
-            (
-                start_anchor,
-                (start_anchor.0 + 1, start_anchor.1),
-                end_anchor,
-                (end_anchor.0 - 1, end_anchor.1),
-                (lane, end_anchor.1),
-            )
-        } else {
-            let start_anchor = (
-                from.left(),
-                clamp_i32(to_center.1, from.top() + 1, from.bottom() - 1),
-            );
-            let end_anchor = (
-                to.right(),
-                clamp_i32(from_center.1, to.top() + 1, to.bottom() - 1),
-            );
-            let lane = find_vertical_lane(
-                (start_anchor.0 + end_anchor.0) / 2,
-                start_anchor,
-                end_anchor,
-                nodes,
-            );
-            (
-                start_anchor,
-                (start_anchor.0 - 1, start_anchor.1),
-                end_anchor,
-                (end_anchor.0 + 1, end_anchor.1),
-                (lane, end_anchor.1),
-            )
-        }
-    } else if to_center.1 >= from_center.1 {
-        let start_anchor = (
-            clamp_i32(to_center.0, from.left() + 1, from.right() - 1),
-            from.bottom(),
-        );
-        let end_anchor = (
-            clamp_i32(from_center.0, to.left() + 1, to.right() - 1),
-            to.top(),
-        );
-        let lane = find_horizontal_lane(
-            (start_anchor.1 + end_anchor.1) / 2,
-            start_anchor,
-            end_anchor,
-            nodes,
-        );
-        (
-            start_anchor,
-            (start_anchor.0, start_anchor.1 + 1),
-            end_anchor,
-            (end_anchor.0, end_anchor.1 - 1),
-            (end_anchor.0, lane),
-        )
-    } else {
-        let start_anchor = (
-            clamp_i32(to_center.0, from.left() + 1, from.right() - 1),
-            from.top(),
-        );
-        let end_anchor = (
-            clamp_i32(from_center.0, to.left() + 1, to.right() - 1),
-            to.bottom(),
-        );
-        let lane = find_horizontal_lane(
-            (start_anchor.1 + end_anchor.1) / 2,
-            start_anchor,
-            end_anchor,
-            nodes,
-        );
-        (
-            start_anchor,
-            (start_anchor.0, start_anchor.1 - 1),
-            end_anchor,
-            (end_anchor.0, end_anchor.1 + 1),
-            (end_anchor.0, lane),
-        )
-    };
-
-    let points = if horizontal {
-        vec![
-            start_tip,
-            (mid.0, start_tip.1),
-            mid,
-            (mid.0, end_tip.1),
-            end_tip,
-        ]
-    } else {
-        vec![
-            start_tip,
-            (start_tip.0, mid.1),
-            mid,
-            (end_tip.0, mid.1),
-            end_tip,
-        ]
-    };
-
-    RoutedRelation {
-        points,
-        start_tip,
-        end_tip,
-    }
-}
-
-fn find_vertical_lane(
-    preferred: i32,
-    start: (i32, i32),
-    end: (i32, i32),
-    nodes: &[ProjectedNode],
-) -> i32 {
-    let min_x = min(start.0, end.0);
-    let max_x = max(start.0, end.0);
-    for delta in 0..24 {
-        for candidate in [preferred + delta, preferred - delta] {
-            if nodes.iter().all(|node| {
-                let rect = node.rect.expand(1);
-                !(candidate >= rect.left()
-                    && candidate <= rect.right()
-                    && horizontal_segment_hits_rect(start.1, min_x, max_x, rect))
-            }) {
-                return candidate;
-            }
-        }
-    }
-    preferred
-}
-
-fn find_horizontal_lane(
-    preferred: i32,
-    start: (i32, i32),
-    end: (i32, i32),
-    nodes: &[ProjectedNode],
-) -> i32 {
-    let min_y = min(start.1, end.1);
-    let max_y = max(start.1, end.1);
-    for delta in 0..24 {
-        for candidate in [preferred + delta, preferred - delta] {
-            if nodes.iter().all(|node| {
-                let rect = node.rect.expand(1);
-                !(candidate >= rect.top()
-                    && candidate <= rect.bottom()
-                    && vertical_segment_hits_rect(start.0, min_y, max_y, rect))
-            }) {
-                return candidate;
-            }
-        }
-    }
-    preferred
-}
-
-fn horizontal_segment_hits_rect(y: i32, x0: i32, x1: i32, rect: ProjectedRect) -> bool {
-    y >= rect.top() && y <= rect.bottom() && x1 >= rect.left() && x0 <= rect.right()
-}
-
-fn vertical_segment_hits_rect(x: i32, y0: i32, y1: i32, rect: ProjectedRect) -> bool {
-    x >= rect.left() && x <= rect.right() && y1 >= rect.top() && y0 <= rect.bottom()
-}
 
 fn inset(area: Rect, margin: u16) -> Rect {
     let horizontal = margin.saturating_mul(2);
@@ -1841,14 +1672,6 @@ fn move_cursor(state: &mut EditState, delta: isize, len: usize) {
     };
     let next = (*cursor as isize + delta).clamp(0, len as isize);
     *cursor = next as usize;
-}
-
-fn clamp_i32(value: i32, min_value: i32, max_value: i32) -> i32 {
-    if min_value > max_value {
-        value
-    } else {
-        value.clamp(min_value, max_value)
-    }
 }
 
 fn slugify_key(key: char) -> String {
