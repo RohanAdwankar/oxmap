@@ -1,4 +1,5 @@
 use std::cmp::{max, min};
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -236,6 +237,18 @@ struct GraphFile {
 }
 
 #[derive(Default, Serialize, Deserialize)]
+struct SavedLayoutOverrides {
+    #[serde(default)]
+    nodes: HashMap<String, SavedPoint>,
+}
+
+#[derive(Clone, Copy, Default, Serialize, Deserialize)]
+struct SavedPoint {
+    x: f32,
+    y: f32,
+}
+
+#[derive(Default, Serialize, Deserialize)]
 struct AppConfig {
     editor_command: Option<String>,
     monocolor: Option<bool>,
@@ -412,7 +425,7 @@ impl App {
             Some("mmd") => {
                 let data = fs::read_to_string(path)
                     .with_context(|| format!("failed to read {}", path.display()))?;
-                let graph = parse_mermaid_graph(&data)?;
+                let graph = parse_saved_mmd(&data)?;
                 self.notes = graph.notes;
                 self.relations = graph.relations;
             }
@@ -1106,52 +1119,43 @@ impl App {
             return Ok(());
         };
 
-        let path = self.ensure_node_file(selected)?;
-        self.sync_note_to_file(selected, &path)?;
+        let path = temp_note_markdown_path(self.notes[selected].key);
+        self.sync_note_to_markdown(selected, &path)?;
         self.run_external_command(
             terminal,
             &format!("{} {}", self.editor_command, shell_quote(&path)),
         )?;
-        self.sync_note_from_file(selected, &path)?;
+        self.sync_note_from_markdown(selected, &path)?;
         self.status = format!("opened {}", path.display());
         Ok(())
     }
 
-    fn ensure_node_file(&mut self, index: usize) -> Result<PathBuf> {
-        let note = &mut self.notes[index];
-        let path = if let Some(path) = &note.file_path {
-            path.clone()
-        } else {
-            let generated = PathBuf::from(format!("nodes/{}.md", slugify(&note.title)));
-            note.file_path = Some(generated.clone());
-            generated
-        };
-        if let Some(parent) = path.parent()
-            && !parent.as_os_str().is_empty()
-        {
-            fs::create_dir_all(parent)?;
-        }
-        Ok(path)
-    }
-
-    fn sync_note_to_file(&self, index: usize, path: &Path) -> Result<()> {
+    fn sync_note_to_markdown(&self, index: usize, path: &Path) -> Result<()> {
         let note = &self.notes[index];
-        let content = format!("{}\n\n{}", note.title, note.body);
+        let content = if note.body.trim().is_empty() {
+            format!("# {}\n", note.title)
+        } else {
+            format!("# {}\n\n{}", note.title, note.body)
+        };
         fs::write(path, content).with_context(|| format!("failed to write {}", path.display()))
     }
 
-    fn sync_note_from_file(&mut self, index: usize, path: &Path) -> Result<()> {
+    fn sync_note_from_markdown(&mut self, index: usize, path: &Path) -> Result<()> {
         let content = fs::read_to_string(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-        let mut parts = content.splitn(2, "\n\n");
-        let title = parts.next().unwrap_or("").trim_end().to_string();
-        let body = parts.next().unwrap_or("").to_string();
+        let mut lines = content.lines();
+        let first = lines.next().unwrap_or("").trim();
+        let title = first.strip_prefix("# ").unwrap_or(first).trim().to_string();
+        let body = lines
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim_start_matches('\n')
+            .to_string();
         let note = &mut self.notes[index];
         if !title.is_empty() {
             note.title = title;
         }
         note.body = body;
-        note.file_path = Some(path.to_path_buf());
         self.dirty = true;
         Ok(())
     }
@@ -1186,31 +1190,21 @@ impl App {
     }
 
     fn save_loaded(&mut self) -> Result<()> {
-        let Some(path) = self.loaded_path.clone() else {
-            bail!("no loaded file; start with a .json or .mmd path");
-        };
+        let path = self.target_save_path();
         self.save_to_path(&path)?;
+        self.loaded_path = Some(path.clone());
         self.status = format!("saved {}", path.display());
         Ok(())
     }
 
     fn save_to_path(&mut self, path: &Path) -> Result<()> {
-        match path.extension().and_then(|ext| ext.to_str()) {
-            Some("json") => {
-                let graph = GraphFile {
-                    notes: self.notes.clone(),
-                    relations: self.relations.clone(),
-                    editor_command: Some(self.editor_command.clone()),
-                };
-                fs::write(path, serde_json::to_string_pretty(&graph)?)
-                    .with_context(|| format!("failed to write {}", path.display()))?;
-            }
-            Some("mmd") => {
-                fs::write(path, self.to_mermaid())
-                    .with_context(|| format!("failed to write {}", path.display()))?;
-            }
-            _ => bail!("unsupported save format for {}", path.display()),
-        }
+        let target = if path.extension().and_then(|ext| ext.to_str()) == Some("mmd") {
+            path.to_path_buf()
+        } else {
+            path.with_extension("mmd")
+        };
+        fs::write(&target, self.to_mmd())
+            .with_context(|| format!("failed to write {}", target.display()))?;
         self.dirty = false;
         Ok(())
     }
@@ -1221,18 +1215,18 @@ impl App {
         } else {
             PathBuf::from("graph.mmd")
         };
-        fs::write(&path, self.to_mermaid())
+        fs::write(&path, self.to_mmd())
             .with_context(|| format!("failed to write {}", path.display()))?;
         Ok(path)
     }
 
-    fn to_mermaid(&self) -> String {
+    fn to_mmd(&self) -> String {
         let mut out = String::from("graph LR\n");
         for note in &self.notes {
             out.push_str(&format!(
                 "    {}[\"{}\"]\n",
                 note.key,
-                escape_mermaid(&note.title.replace('\n', " "))
+                escape_mermaid(&note_markdown_label(note))
             ));
         }
         for relation in &self.relations {
@@ -1243,7 +1237,22 @@ impl App {
                 relation.to
             ));
         }
-        out
+        let layout = SavedLayoutOverrides {
+            nodes: self
+                .notes
+                .iter()
+                .map(|note| {
+                    (
+                        note.key.to_string(),
+                        SavedPoint {
+                            x: note.x,
+                            y: note.y,
+                        },
+                    )
+                })
+                .collect(),
+        };
+        merge_mmd_and_layout(&out, &layout).unwrap_or(out)
     }
 
     fn quit_requested(&mut self, force: bool) -> Result<()> {
@@ -1304,6 +1313,16 @@ impl App {
         ('a'..='z')
             .chain('0'..='9')
             .find(|candidate| !used.contains(candidate))
+    }
+
+    fn target_save_path(&self) -> PathBuf {
+        match &self.loaded_path {
+            Some(path) if path.extension().and_then(|ext| ext.to_str()) == Some("mmd") => {
+                path.clone()
+            }
+            Some(path) => path.with_extension("mmd"),
+            None => PathBuf::from("graph.mmd"),
+        }
     }
 
     fn project_rect(&self, note: &Note, area: Rect) -> ProjectedRect {
@@ -1451,6 +1470,21 @@ fn parse_mermaid_graph(source: &str) -> Result<GraphFile> {
     })
 }
 
+fn parse_saved_mmd(source: &str) -> Result<GraphFile> {
+    let (definition, layout) = split_saved_layout(source)?;
+    let mut graph = parse_mermaid_graph(&definition)?;
+    for note in &mut graph.notes {
+        if let Some(point) = layout.nodes.get(&note.key.to_string()) {
+            note.x = point.x;
+            note.y = point.y;
+        }
+        let (title, body) = split_saved_label(&note.title);
+        note.title = title;
+        note.body = body;
+    }
+    Ok(graph)
+}
+
 fn draw_line(
     buf: &mut Buffer,
     area: Rect,
@@ -1498,6 +1532,69 @@ fn draw_line(
             y += sy;
         }
     }
+}
+
+fn split_saved_layout(source: &str) -> Result<(String, SavedLayoutOverrides)> {
+    const START: &str = "%% OXDRAW LAYOUT START";
+    const END: &str = "%% OXDRAW LAYOUT END";
+
+    let mut definition_lines = Vec::new();
+    let mut layout_lines = Vec::new();
+    let mut in_block = false;
+
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.eq_ignore_ascii_case(START) {
+            in_block = true;
+            continue;
+        }
+        if trimmed.eq_ignore_ascii_case(END) {
+            in_block = false;
+            continue;
+        }
+        if in_block {
+            let mut segment = line.trim_start();
+            if let Some(rest) = segment.strip_prefix("%%") {
+                segment = rest.trim_start();
+            }
+            if !segment.trim().is_empty() {
+                layout_lines.push(segment.to_string());
+            }
+        } else {
+            definition_lines.push(line);
+        }
+    }
+
+    let mut definition = definition_lines.join("\n");
+    if source.ends_with('\n') {
+        definition.push('\n');
+    }
+    let layout = if layout_lines.is_empty() {
+        SavedLayoutOverrides::default()
+    } else {
+        serde_json::from_str(&layout_lines.join("\n"))
+            .context("failed to parse embedded oxdraw layout block")?
+    };
+    Ok((definition, layout))
+}
+
+fn merge_mmd_and_layout(definition: &str, layout: &SavedLayoutOverrides) -> Result<String> {
+    let trimmed = definition.trim_end_matches('\n');
+    let mut output = trimmed.to_string();
+    output.push('\n');
+    if layout.nodes.is_empty() {
+        return Ok(output);
+    }
+    let json = serde_json::to_string_pretty(layout)?;
+    output.push('\n');
+    output.push_str("%% OXDRAW LAYOUT START\n");
+    for line in json.lines() {
+        output.push_str("%% ");
+        output.push_str(line);
+        output.push('\n');
+    }
+    output.push_str("%% OXDRAW LAYOUT END\n");
+    Ok(output)
 }
 
 fn draw_polyline(buf: &mut Buffer, area: Rect, points: &[(i32, i32)], glyph: char, style: Style) {
@@ -1754,22 +1851,34 @@ fn clamp_i32(value: i32, min_value: i32, max_value: i32) -> i32 {
     }
 }
 
-fn slugify(title: &str) -> String {
-    let mut out = String::new();
-    for ch in title.chars() {
-        if ch.is_ascii_alphanumeric() {
-            out.push(ch.to_ascii_lowercase());
-        } else if !out.ends_with('-') {
-            out.push('-');
-        }
-    }
-    out.trim_matches('-').to_string()
-}
-
 fn slugify_key(key: char) -> String {
     key.to_string()
 }
 
 fn escape_mermaid(text: &str) -> String {
     text.replace('"', "\\\"")
+}
+
+fn note_markdown_label(note: &Note) -> String {
+    if note.body.trim().is_empty() {
+        note.title.replace('\n', "<br/>")
+    } else {
+        format!(
+            "{}<br/>{}",
+            note.title.replace('\n', "<br/>"),
+            note.body.replace('\n', "<br/>")
+        )
+    }
+}
+
+fn split_saved_label(label: &str) -> (String, String) {
+    let normalized = label.replace("<br/>", "\n").replace("<br>", "\n");
+    let mut lines = normalized.lines();
+    let title = lines.next().unwrap_or("").trim().to_string();
+    let body = lines.collect::<Vec<_>>().join("\n").trim().to_string();
+    (title, body)
+}
+
+fn temp_note_markdown_path(key: char) -> PathBuf {
+    env::temp_dir().join(format!("oxmap2-node-{key}.md"))
 }
