@@ -255,8 +255,10 @@ struct OxPointView {
 
 #[derive(Default, Serialize, Deserialize)]
 struct AppConfig {
+    #[serde(rename = "editor", alias = "editor_command")]
     editor_command: Option<String>,
     monocolor: Option<bool>,
+    #[serde(rename = "movement_step", alias = "movement_speed")]
     movement_speed: Option<f32>,
 }
 
@@ -1964,5 +1966,22 @@ mod tests {
         assert_eq!(app.notes[0].key, 'b');
         assert!(app.relations.is_empty());
         assert!(app.selected.is_none());
+    }
+
+    #[test]
+    fn config_accepts_editor_and_movement_step_keys() {
+        let config: AppConfig = serde_json::from_str(
+            r#"{
+                "editor": "~/nvim-macos-arm64/bin/nvim",
+                "movement_step": 6
+            }"#,
+        )
+        .expect("config should parse");
+
+        assert_eq!(
+            config.editor_command.as_deref(),
+            Some("~/nvim-macos-arm64/bin/nvim")
+        );
+        assert_eq!(config.movement_speed, Some(6.0));
     }
 }
