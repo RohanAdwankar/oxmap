@@ -977,7 +977,7 @@ impl App {
         let index = self.notes.len();
         self.notes.push(Note {
             key,
-            title: format!("Node {}", key),
+            title: String::new(),
             body: String::new(),
             x: self.camera_x - 8.0,
             y: self.camera_y - 3.0,
@@ -989,7 +989,7 @@ impl App {
         self.selected = Some(index);
         self.mode = Mode::Edit(EditState {
             field: EditField::Title,
-            title_cursor: self.notes[index].title.len(),
+            title_cursor: 0,
             body_cursor: 0,
         });
         self.dirty = true;
