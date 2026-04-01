@@ -503,7 +503,7 @@ impl App {
 
         let count = self.take_count();
         match key.code {
-            KeyCode::Char('q') => self.quit_requested(false)?,
+            KeyCode::Char('q') => self.quit_requested(false),
             KeyCode::Char(':') => {
                 self.mode = Mode::Command;
                 self.command_buffer.clear();
@@ -636,8 +636,8 @@ impl App {
                 self.save_loaded()?;
                 self.should_quit = true;
             }
-            "q" => self.quit_requested(false)?,
-            "q!" => self.should_quit = true,
+            "q" => self.quit_requested(false),
+            "q!" => self.quit_requested(true),
             "export" => {
                 let path = self.export_mermaid()?;
                 self.status = format!("exported {}", path.display());
@@ -1236,12 +1236,12 @@ impl App {
         out
     }
 
-    fn quit_requested(&mut self, force: bool) -> Result<()> {
+    fn quit_requested(&mut self, force: bool) {
         if self.dirty && !force {
-            bail!("unsaved changes; use :q! to force or :w to save");
+            self.status = "unsaved changes; use :w to save or :q! to force".into();
+            return;
         }
         self.should_quit = true;
-        Ok(())
     }
 
     fn load_config(&mut self) -> Result<()> {
@@ -1733,5 +1733,50 @@ fn arrow_glyph(dx: i32, dy: i32) -> char {
         if dx >= 0 { '▶' } else { '◀' }
     } else {
         if dy >= 0 { '▼' } else { '▲' }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unsaved_quit_stays_in_app() {
+        let mut app = App::demo();
+        app.dirty = true;
+
+        app.run_command("q").expect("q command should not error");
+
+        assert!(!app.should_quit);
+        assert!(app.status.contains("unsaved changes"));
+    }
+
+    #[test]
+    fn wq_writes_graph_mmd_for_fresh_session() {
+        let original_dir = env::current_dir().expect("current dir");
+        let temp_dir = env::temp_dir().join(format!(
+            "oxmap-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        env::set_current_dir(&temp_dir).expect("enter temp dir");
+
+        let graph_path = temp_dir.join("graph.mmd");
+        let mut app = App::demo();
+        app.dirty = true;
+
+        let result = app.run_command("wq");
+
+        env::set_current_dir(&original_dir).expect("restore cwd");
+
+        assert!(result.is_ok());
+        assert!(app.should_quit);
+        assert!(graph_path.exists());
+
+        let _ = fs::remove_file(&graph_path);
+        let _ = fs::remove_dir(&temp_dir);
     }
 }
