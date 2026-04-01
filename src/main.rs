@@ -216,7 +216,7 @@ impl RelationType {
             Self::Directional => "-->",
             Self::Bidirectional => "<-->",
             Self::Compositional => "--o",
-            Self::Cluster => "-.-",
+            Self::Cluster => "-->",
         }
     }
 }
@@ -1220,7 +1220,7 @@ impl App {
         let mut out = String::from("graph LR\n");
         for note in &self.notes {
             out.push_str(&format!(
-                "    {}[\"{}\"]\n",
+                "    {}[{}]\n",
                 note.key,
                 escape_mermaid(&note_markdown_label(note))
             ));
@@ -1426,10 +1426,7 @@ fn parse_mermaid_graph(source: &str) -> Result<GraphFile> {
             continue;
         }
 
-        if let Some((left, title)) = trimmed.split_once("[\"") {
-            let Some(title) = title.strip_suffix("\"]") else {
-                continue;
-            };
+        if let Some((left, title)) = parse_mermaid_node_line(trimmed) {
             let key = left
                 .trim()
                 .chars()
@@ -1475,6 +1472,16 @@ fn parse_mermaid_graph(source: &str) -> Result<GraphFile> {
         relations,
         editor_command: None,
     })
+}
+
+fn parse_mermaid_node_line(line: &str) -> Option<(&str, String)> {
+    let (left, right) = line.split_once('[')?;
+    let label = right.strip_suffix(']')?;
+    let label = label
+        .strip_prefix('"')
+        .and_then(|inner| inner.strip_suffix('"'))
+        .unwrap_or(label);
+    Some((left, label.to_string()))
 }
 
 fn parse_saved_mmd(source: &str) -> Result<GraphFile> {
@@ -1778,5 +1785,59 @@ mod tests {
 
         let _ = fs::remove_file(&graph_path);
         let _ = fs::remove_dir(&temp_dir);
+    }
+
+    #[test]
+    fn mermaid_export_uses_oxdraw_compatible_syntax() {
+        let mut app = App::demo();
+        app.notes = vec![Note {
+            key: 'a',
+            title: "hello world".into(),
+            body: String::new(),
+            x: 0.0,
+            y: 0.0,
+            w: 20.0,
+            h: 8.0,
+            color: NoteColor::White,
+            file_path: None,
+        }];
+        app.relations = vec![Relation {
+            from: 'a',
+            to: 'a',
+            kind: RelationType::Cluster,
+        }];
+
+        let output = app.to_mermaid_definition();
+
+        assert!(output.contains("a[hello world]"));
+        assert!(output.contains("a --> a"));
+        assert!(!output.contains("[\""));
+        assert!(!output.contains("-.-"));
+    }
+
+    #[test]
+    fn saved_mmd_round_trips_note_positions() {
+        let mut app = App::demo();
+        app.notes = vec![Note {
+            key: 'a',
+            title: "hello world".into(),
+            body: "body text".into(),
+            x: 123.5,
+            y: -48.25,
+            w: 20.0,
+            h: 8.0,
+            color: NoteColor::White,
+            file_path: None,
+        }];
+        app.relations.clear();
+
+        let saved = app.to_mmd();
+        let loaded = parse_saved_mmd(&saved).expect("saved mmd should parse");
+
+        assert_eq!(loaded.notes.len(), 1);
+        assert_eq!(loaded.notes[0].title, "hello world");
+        assert_eq!(loaded.notes[0].body, "body text");
+        assert!((loaded.notes[0].x - 123.5).abs() < f32::EPSILON);
+        assert!((loaded.notes[0].y - (-48.25)).abs() < f32::EPSILON);
     }
 }
