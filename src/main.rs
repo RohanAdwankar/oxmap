@@ -510,6 +510,7 @@ impl App {
                 self.status = "command mode".into();
             }
             KeyCode::Char('a') => self.add_node(),
+            KeyCode::Char('x') => self.delete_selected_note(),
             KeyCode::Char('f') => {
                 self.mode = Mode::AwaitSelect;
                 self.status = "select node by key".into();
@@ -958,11 +959,15 @@ impl App {
         let repeat = max(1, count as i32) as f32;
         let step = self.movement_speed * repeat;
         if let Some(selected) = self.selected {
-            let note = &mut self.notes[selected];
-            note.x += dx * step;
-            note.y += dy * step;
+            let note_key = {
+                let note = &mut self.notes[selected];
+                note.x += dx * step;
+                note.y += dy * step;
+                note.key
+            };
+            self.keep_selected_note_visible();
             self.dirty = true;
-            self.status = format!("moved [{}] by {},{}", note.key, dx * step, dy * step);
+            self.status = format!("moved [{}] by {},{}", note_key, dx * step, dy * step);
         } else {
             self.camera_x += (dx * 4.0 * step) / self.zoom;
             self.camera_y += (dy * 2.5 * step) / self.zoom;
@@ -1005,6 +1010,21 @@ impl App {
             self.mode = Mode::Normal;
             self.status = format!("unknown node key [{}]", key);
         }
+    }
+
+    fn delete_selected_note(&mut self) {
+        let Some(selected) = self.selected else {
+            self.status = "select a node first".into();
+            return;
+        };
+
+        let removed = self.notes.remove(selected);
+        self.relations
+            .retain(|relation| relation.from != removed.key && relation.to != removed.key);
+        self.selected = None;
+        self.mode = Mode::Normal;
+        self.dirty = true;
+        self.status = format!("deleted [{}]", removed.key);
     }
 
     fn begin_relation(&mut self, kind: RelationType) {
@@ -1303,6 +1323,42 @@ impl App {
             }
             Some(path) => path.with_extension("mmd"),
             None => PathBuf::from("graph.mmd"),
+        }
+    }
+
+    fn keep_selected_note_visible(&mut self) {
+        let Some(selected) = self.selected else {
+            return;
+        };
+        if self.last_canvas.width < 4 || self.last_canvas.height < 4 {
+            return;
+        }
+        let Some(note) = self.notes.get(selected) else {
+            return;
+        };
+
+        let projected = self.project_rect(note, self.last_canvas);
+        let margin_x = 2;
+        let margin_y = 1;
+        let left = projected.x;
+        let right = projected.x + projected.w;
+        let top = projected.y;
+        let bottom = projected.y + projected.h;
+        let min_x = margin_x;
+        let max_x = self.last_canvas.width as i32 - margin_x;
+        let min_y = margin_y;
+        let max_y = self.last_canvas.height as i32 - margin_y;
+
+        if left < min_x {
+            self.camera_x -= (min_x - left) as f32 / self.zoom;
+        } else if right > max_x {
+            self.camera_x += (right - max_x) as f32 / self.zoom;
+        }
+
+        if top < min_y {
+            self.camera_y -= (min_y - top) as f32 / self.zoom;
+        } else if bottom > max_y {
+            self.camera_y += (bottom - max_y) as f32 / self.zoom;
         }
     }
 
@@ -1839,5 +1895,74 @@ mod tests {
         assert_eq!(loaded.notes[0].body, "body text");
         assert!((loaded.notes[0].x - 123.5).abs() < f32::EPSILON);
         assert!((loaded.notes[0].y - (-48.25)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn moving_selected_note_keeps_it_on_screen() {
+        let mut app = App::demo();
+        app.notes = vec![Note {
+            key: 'a',
+            title: "hello".into(),
+            body: String::new(),
+            x: 0.0,
+            y: 0.0,
+            w: 20.0,
+            h: 8.0,
+            color: NoteColor::White,
+            file_path: None,
+        }];
+        app.selected = Some(0);
+        app.last_canvas = Rect::new(0, 0, 40, 20);
+        app.zoom = 1.0;
+        app.camera_x = 0.0;
+        app.camera_y = 0.0;
+        app.movement_speed = 2.0;
+
+        app.apply_motion(1.0, 0.0, 20);
+
+        let projected = app.project_rect(&app.notes[0], app.last_canvas);
+        assert!(projected.x + projected.w <= app.last_canvas.width as i32 - 2);
+    }
+
+    #[test]
+    fn deleting_selected_note_removes_attached_relations() {
+        let mut app = App::demo();
+        app.notes = vec![
+            Note {
+                key: 'a',
+                title: "a".into(),
+                body: String::new(),
+                x: 0.0,
+                y: 0.0,
+                w: 20.0,
+                h: 8.0,
+                color: NoteColor::White,
+                file_path: None,
+            },
+            Note {
+                key: 'b',
+                title: "b".into(),
+                body: String::new(),
+                x: 10.0,
+                y: 10.0,
+                w: 20.0,
+                h: 8.0,
+                color: NoteColor::White,
+                file_path: None,
+            },
+        ];
+        app.relations = vec![Relation {
+            from: 'a',
+            to: 'b',
+            kind: RelationType::Directional,
+        }];
+        app.selected = Some(0);
+
+        app.delete_selected_note();
+
+        assert_eq!(app.notes.len(), 1);
+        assert_eq!(app.notes[0].key, 'b');
+        assert!(app.relations.is_empty());
+        assert!(app.selected.is_none());
     }
 }
