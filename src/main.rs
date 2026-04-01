@@ -1668,12 +1668,12 @@ fn shell_quote(path: &Path) -> String {
 
 fn config_path() -> Result<PathBuf> {
     if let Ok(dir) = env::var("XDG_CONFIG_HOME") {
-        return Ok(PathBuf::from(dir).join("oxmap2").join("config.json"));
+        return Ok(PathBuf::from(dir).join("oxmap").join("config.json"));
     }
     let home = env::var("HOME").context("HOME is not set")?;
     Ok(PathBuf::from(home)
         .join(".config")
-        .join("oxmap2")
+        .join("oxmap")
         .join("config.json"))
 }
 
@@ -1715,7 +1715,7 @@ fn split_saved_label(label: &str) -> (String, String) {
 }
 
 fn temp_note_markdown_path(key: char) -> PathBuf {
-    env::temp_dir().join(format!("oxmap2-node-{key}.md"))
+    env::temp_dir().join(format!("oxmap-node-{key}.md"))
 }
 
 fn ox_point_components(point: &OxPoint) -> Option<OxPointView> {
