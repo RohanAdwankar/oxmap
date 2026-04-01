@@ -1,49 +1,208 @@
 Output demo/oxmap.gif
+Output demo/oxmap.mp4
 
 Set Shell "zsh"
-Set FontSize 22
-Set Width 1400
-Set Height 900
-Set Theme "Builtin Dark"
+Set FontSize 16
+Set Width 2000
+Set Height 1300
+Set Padding 24
+Set Framerate 30
+Set TypingSpeed 80ms
+Set Theme { "name": "Oxmap Demo", "black": "#181b22", "red": "#ff7a90", "green": "#8fe388", "yellow": "#ffd166", "blue": "#72b7ff", "magenta": "#c792ea", "cyan": "#7fdbca", "white": "#d9dde7", "brightBlack": "#5d6678", "brightRed": "#ff98aa", "brightGreen": "#a7f3a0", "brightYellow": "#ffe08a", "brightBlue": "#9ccaff", "brightMagenta": "#d8a9ff", "brightCyan": "#9ee7da", "brightWhite": "#ffffff", "background": "#0f1218", "foreground": "#d9dde7", "selection": "#2c3444", "cursor": "#d9dde7" }
 
+Hide
 Type "cd /Users/rohanadwankar/oxmap"
 Enter
-Type "cargo run --"
+Type "export XDG_CONFIG_HOME=/Users/rohanadwankar/oxmap/demo/vhs-config"
 Enter
-Sleep 2s
+Type "target/debug/oxmap"
+Enter
+Sleep 1800ms
+Show
+Sleep 1200ms
+
+Type "G"
+Sleep 1500ms
 
 Type "a"
 Sleep 300ms
-Type "Bug"
-Sleep 300ms
+Type "Make demo video"
+Sleep 250ms
 Tab
 Sleep 200ms
-Type "drag camera follows"
-Sleep 400ms
+Type "first ill make a connection to this note"
+Enter
+Type "then ill move it around"
+Enter
+Type "then delete it"
 Escape
-Sleep 500ms
+Sleep 1000ms
 
-Type "8l"
-Sleep 400ms
-Type "4j"
-Sleep 400ms
+Type "o"
+Sleep 250ms
+Hide
+Sleep 1500ms
+Show
+Sleep 800ms
+
 Type "m"
-Sleep 200ms
+Sleep 300ms
 Type "f"
-Sleep 200ms
-Type "a"
-Sleep 600ms
-
-Type "s"
-Sleep 400ms
+Sleep 300ms
 Type "d"
-Sleep 400ms
-Type "G"
-Sleep 600ms
+Sleep 2000ms
+
+Type "l"
+Sleep 50ms
+Type "l"
+Sleep 50ms
+Type "l"
+Sleep 50ms
+Type "l"
+Sleep 50ms
+Type "l"
+Sleep 50ms
+Type "l"
+Sleep 50ms
+Type "l"
+Sleep 50ms
+Type "l"
+Sleep 50ms
+Type "l"
+Sleep 50ms
+Type "l"
+Sleep 50ms
+Type "l"
+Sleep 50ms
+Type "l"
+Sleep 50ms
+Type "l"
+Sleep 50ms
+Type "l"
+Sleep 50ms
+Type "l"
+Sleep 50ms
+Type "l"
+Sleep 50ms
+Type "l"
+Sleep 50ms
+Type "l"
+Sleep 50ms
+Type "l"
+Sleep 50ms
+Type "l"
+Sleep 50ms
+Type "l"
+Sleep 50ms
+
+Type "j"
+Sleep 50ms
+Type "j"
+Sleep 50ms
+Type "j"
+Sleep 50ms
+Type "j"
+Sleep 50ms
+Type "j"
+Sleep 50ms
+Type "j"
+Sleep 50ms
+Type "j"
+Sleep 50ms
+Type "j"
+Sleep 50ms
+Type "j"
+Sleep 50ms
+Type "j"
+Sleep 50ms
+Type "j"
+Sleep 50ms
+Type "j"
+Sleep 50ms
+Type "j"
+Sleep 50ms
+Type "j"
+Sleep 50ms
+Type "j"
+Sleep 50ms
+Type "j"
+Sleep 50ms
+Type "j"
+Sleep 50ms
+Type "j"
+Sleep 50ms
+Type "j"
+Sleep 50ms
+Type "j"
+Sleep 50ms
+Type "j"
+Sleep 50ms
+
+Type "k"
+Sleep 50ms
+Type "k"
+Sleep 50ms
+
+Type "k"
+Sleep 50ms
+
+Type "k"
+Sleep 50ms
+
+Type "k"
+Sleep 50ms
+
+Type "k"
+Sleep 50ms
+
+Type "k"
+Sleep 50ms
+
+Type "k"
+Sleep 50ms
+
+Type "k"
+Sleep 50ms
+
+Type "k"
+Sleep 50ms
+
+Type "k"
+Sleep 50ms
+
+Type "k"
+Sleep 50ms
+
+Type "k"
+Sleep 50ms
+
+Type "k"
+Sleep 50ms
+
+Type "k"
+Sleep 50ms
+
+Type "k"
+Sleep 50ms
+
+Type "k"
+Sleep 50ms
+
+Type "k"
+Sleep 50ms
+
+Type "k"
+Sleep 50ms
+
+Type "k"
+Sleep 50ms
+
+Type "k"
+Sleep 50ms
 
 Type "x"
-Sleep 500ms
+Sleep 1000ms
 
 Type ":wq"
 Enter
-Sleep 1s
+Sleep 1200ms
