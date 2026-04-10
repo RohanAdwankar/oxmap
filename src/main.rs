@@ -265,9 +265,7 @@ struct AppConfig {
 enum Mode {
     Normal,
     AwaitSelect(u16),
-    AwaitRelationPrefix(RelationType),
     AwaitRelationTarget(RelationType),
-    AwaitUnlinkPrefix,
     AwaitUnlinkTarget,
     Edit(EditState),
     Command,
@@ -478,31 +476,10 @@ impl App {
             }
             return Ok(());
         }
-        if let Mode::AwaitRelationPrefix(kind) = &self.mode {
-            if let KeyCode::Char('f') = key.code {
-                let relation = *kind;
-                self.mode = Mode::AwaitRelationTarget(relation);
-                self.status = format!("relation {}: target key", relation.label());
-            } else {
-                self.status = "relation expects f then target key".into();
-                self.mode = Mode::Normal;
-            }
-            return Ok(());
-        }
         if let Mode::AwaitRelationTarget(kind) = &self.mode {
             if let KeyCode::Char(ch) = key.code {
                 let relation = *kind;
                 self.create_relation_to(ch, relation);
-            }
-            return Ok(());
-        }
-        if matches!(self.mode, Mode::AwaitUnlinkPrefix) {
-            if let KeyCode::Char('f') = key.code {
-                self.mode = Mode::AwaitUnlinkTarget;
-                self.status = "unlink: target key".into();
-            } else {
-                self.status = "unlink expects f then target key".into();
-                self.mode = Mode::Normal;
             }
             return Ok(());
         }
@@ -878,9 +855,7 @@ impl App {
         let mode = match &self.mode {
             Mode::Normal => self.status.as_str(),
             Mode::AwaitSelect(_) => "awaiting node key",
-            Mode::AwaitRelationPrefix(_) => "relation: press f then target key",
             Mode::AwaitRelationTarget(kind) => kind.label(),
-            Mode::AwaitUnlinkPrefix => "unlink: press f then target key",
             Mode::AwaitUnlinkTarget => "unlink: target key",
             Mode::Edit(state) => match state.field {
                 EditField::Title => "edit title  tab body  esc done",
@@ -1066,8 +1041,8 @@ impl App {
             self.status = "select a source node first".into();
             return;
         }
-        self.mode = Mode::AwaitRelationPrefix(kind);
-        self.status = format!("{} relation: press f then target key", kind.label());
+        self.mode = Mode::AwaitRelationTarget(kind);
+        self.status = format!("{} relation: target key", kind.label());
     }
 
     fn begin_unlink(&mut self) {
@@ -1075,8 +1050,8 @@ impl App {
             self.status = "select a source node first".into();
             return;
         }
-        self.mode = Mode::AwaitUnlinkPrefix;
-        self.status = "unlink: press f then target key".into();
+        self.mode = Mode::AwaitUnlinkTarget;
+        self.status = "unlink: target key".into();
     }
 
     fn create_relation_to(&mut self, key: char, kind: RelationType) {
