@@ -17,6 +17,7 @@ oxmap # or "oxmap sticknotes.mmd" to open a file
 | `f` then `<key>` | Select one note by key |
 | `<count>` then `f` then keys | Multi-select notes, e.g. `3fabc` |
 | `i` | Edit the selected note inline |
+|`Tab`| Leave edit note view |
 | `o` | Open the selected note in your configured editor |
 | `x` | Delete the selected note |
 | `m` `<key>` | Create a relation from the selected note(s) to the target |
