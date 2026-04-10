@@ -267,6 +267,8 @@ enum Mode {
     AwaitSelect,
     AwaitRelationPrefix(RelationType),
     AwaitRelationTarget(RelationType),
+    AwaitUnlinkPrefix,
+    AwaitUnlinkTarget,
     Edit(EditState),
     Command,
 }
@@ -492,6 +494,22 @@ impl App {
                 }
                 return Ok(());
             }
+            Mode::AwaitUnlinkPrefix => {
+                if let KeyCode::Char('f') = key.code {
+                    self.mode = Mode::AwaitUnlinkTarget;
+                    self.status = "unlink: target key".into();
+                } else {
+                    self.status = "unlink expects f then target key".into();
+                    self.mode = Mode::Normal;
+                }
+                return Ok(());
+            }
+            Mode::AwaitUnlinkTarget => {
+                if let KeyCode::Char(ch) = key.code {
+                    self.remove_relation_to(ch);
+                }
+                return Ok(());
+            }
             Mode::Normal | Mode::Edit(_) | Mode::Command => {}
         }
 
@@ -523,6 +541,7 @@ impl App {
                 let relation = RelationType::from_digit(count).unwrap_or(RelationType::Directional);
                 self.begin_relation(relation);
             }
+            KeyCode::Char('u') => self.begin_unlink(),
             KeyCode::Char('G') => self.fit_all(),
             KeyCode::Char('s') | KeyCode::Char('+') | KeyCode::Char('=') => self.zoom_by(1.2),
             KeyCode::Char('d') | KeyCode::Char('-') | KeyCode::Char('_') => self.zoom_by(1.0 / 1.2),
@@ -850,6 +869,8 @@ impl App {
             Mode::AwaitSelect => "awaiting node key",
             Mode::AwaitRelationPrefix(_) => "relation: press f then target key",
             Mode::AwaitRelationTarget(kind) => kind.label(),
+            Mode::AwaitUnlinkPrefix => "unlink: press f then target key",
+            Mode::AwaitUnlinkTarget => "unlink: target key",
             Mode::Edit(state) => match state.field {
                 EditField::Title => "edit title  tab body  esc done",
                 EditField::Body => "edit body  tab title  esc done",
@@ -1038,6 +1059,15 @@ impl App {
         self.status = format!("{} relation: press f then target key", kind.label());
     }
 
+    fn begin_unlink(&mut self) {
+        if self.selected.is_none() {
+            self.status = "select a source node first".into();
+            return;
+        }
+        self.mode = Mode::AwaitUnlinkPrefix;
+        self.status = "unlink: press f then target key".into();
+    }
+
     fn create_relation_to(&mut self, key: char, kind: RelationType) {
         let Some(selected) = self.selected else {
             self.mode = Mode::Normal;
@@ -1057,6 +1087,25 @@ impl App {
         self.dirty = true;
         self.mode = Mode::Normal;
         self.status = format!("linked [{}] -> [{}] ({})", from_key, key, kind.label());
+    }
+
+    fn remove_relation_to(&mut self, key: char) {
+        let Some(selected) = self.selected else {
+            self.mode = Mode::Normal;
+            return;
+        };
+        let from_key = self.notes[selected].key;
+        let before = self.relations.len();
+        self.relations
+            .retain(|relation| !(relation.from == from_key && relation.to == key));
+        let removed = before.saturating_sub(self.relations.len());
+        self.mode = Mode::Normal;
+        if removed == 0 {
+            self.status = format!("no relation [{}] -> [{}]", from_key, key);
+            return;
+        }
+        self.dirty = true;
+        self.status = format!("unlinked [{}] -> [{}]", from_key, key);
     }
 
     fn cancel_pending(&mut self) {
@@ -1966,6 +2015,65 @@ mod tests {
         assert_eq!(app.notes[0].key, 'b');
         assert!(app.relations.is_empty());
         assert!(app.selected.is_none());
+    }
+
+    #[test]
+    fn removing_relation_to_target_deletes_only_matching_edge() {
+        let mut app = App::demo();
+        app.notes = vec![
+            Note {
+                key: 'a',
+                title: "a".into(),
+                body: String::new(),
+                x: 0.0,
+                y: 0.0,
+                w: 20.0,
+                h: 8.0,
+                color: NoteColor::White,
+                file_path: None,
+            },
+            Note {
+                key: 'b',
+                title: "b".into(),
+                body: String::new(),
+                x: 10.0,
+                y: 10.0,
+                w: 20.0,
+                h: 8.0,
+                color: NoteColor::White,
+                file_path: None,
+            },
+            Note {
+                key: 'c',
+                title: "c".into(),
+                body: String::new(),
+                x: 20.0,
+                y: 20.0,
+                w: 20.0,
+                h: 8.0,
+                color: NoteColor::White,
+                file_path: None,
+            },
+        ];
+        app.relations = vec![
+            Relation {
+                from: 'a',
+                to: 'b',
+                kind: RelationType::Directional,
+            },
+            Relation {
+                from: 'a',
+                to: 'c',
+                kind: RelationType::Directional,
+            },
+        ];
+        app.selected = Some(0);
+
+        app.remove_relation_to('b');
+
+        assert_eq!(app.relations.len(), 1);
+        assert_eq!(app.relations[0].to, 'c');
+        assert!(app.status.contains("unlinked"));
     }
 
     #[test]
