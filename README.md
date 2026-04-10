@@ -2,7 +2,12 @@
 
 ![demo](./demo/oxmap.gif)
 
-Terminal mind map and flowchart editor with Mermaid `.mmd` export.
+Terminal mind map and flowchart editor.
+
+```bash
+cargo install oxmap
+oxmap # or "oxmap sticknotes.mmd" to open a file
+```
 
 ## Commands
 

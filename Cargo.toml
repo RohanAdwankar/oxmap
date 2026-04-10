@@ -1,7 +1,13 @@
 [package]
 name = "oxmap"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
+authors = ["Rohan Adwankar <rohan.adwankar@gmail.com>"]
+description = "TUI for Mindmaps"
+repository = "https://github.com/RohanAdwankar/oxmap"
+license = "MIT"
+keywords = ["sticky", "notes", "mermaid", "mindmap", "vim"]
+
 
 [dependencies]
 anyhow = "1.0"
