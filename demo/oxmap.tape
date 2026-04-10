@@ -7,7 +7,7 @@ Set Width 2000
 Set Height 1300
 Set Padding 24
 Set Framerate 10
-Set TypingSpeed 80ms
+Set TypingSpeed 50ms
 Set Theme { "name": "Oxmap Demo", "black": "#181b22", "red": "#ff7a90", "green": "#8fe388", "yellow": "#ffd166", "blue": "#72b7ff", "magenta": "#c792ea", "cyan": "#7fdbca", "white": "#d9dde7", "brightBlack": "#5d6678", "brightRed": "#ff98aa", "brightGreen": "#a7f3a0", "brightYellow": "#ffe08a", "brightBlue": "#9ccaff", "brightMagenta": "#d8a9ff", "brightCyan": "#9ee7da", "brightWhite": "#ffffff", "background": "#0f1218", "foreground": "#d9dde7", "selection": "#2c3444", "cursor": "#d9dde7" }
 
 Hide
@@ -55,21 +55,17 @@ Sleep 10ms
 
 Type "a"
 Sleep 100ms
-Type "Make demo video"
+Type "Make demo"
 Sleep 250ms
 Tab
 Sleep 200ms
-Type "first ill make a connection to this note"
+Type "first make a connection"
 Enter
-Type "then ill move it around"
-Enter
-Type "then delete it"
+Type "then move it around, then delete it"
 Escape
 Sleep 1000ms
 
 Type "m"
-Sleep 100ms
-Type "f"
 Sleep 100ms
 Type "d"
 Sleep 2000ms
@@ -272,11 +268,268 @@ Type "k"
 Sleep 10ms
 
 Type "k"
-Sleep 2000ms
+Sleep 1000ms
 
 Type "x"
 Sleep 1000ms
 
-Type "wq"
+Type "3f"
+Sleep 10ms
+Type "a"
+Sleep 100ms
+Type "d"
+Sleep 100ms
+Type "p"
+Sleep 2000ms
+
+Type "j"
+Sleep 10ms
+
+Type "j"
+Sleep 10ms
+
+Type "j"
+Sleep 10ms
+
+Type "j"
+Sleep 10ms
+
+Type "j"
+Sleep 10ms
+
+Type "j"
+Sleep 10ms
+
+Type "j"
+Sleep 10ms
+
+Type "j"
+Sleep 10ms
+
+Type "j"
+Sleep 10ms
+
+Type "j"
+Sleep 10ms
+
+Type "j"
+Sleep 10ms
+
+
+
+Type "k"
+Sleep 10ms
+
+Type "k"
+Sleep 10ms
+
+Type "k"
+Sleep 10ms
+
+Type "k"
+Sleep 10ms
+
+Type "k"
+Sleep 10ms
+
+Type "k"
+Sleep 10ms
+
+Type "k"
+Sleep 10ms
+
+Type "k"
+Sleep 10ms
+
+Type "k"
+Sleep 10ms
+
+Type "k"
+Sleep 10ms
+
+Type "k"
+Sleep 10ms
+
+
+
+
+Type "f"
+Sleep 100ms
+Type "d"
+Sleep 100ms
+Type "m"
+Sleep 100ms
+Type "i"
+Sleep 200ms
+
+Type "f"
+Sleep 100ms
+Type "a"
+Sleep 100ms
+Type "m"
+Sleep 100ms
+Type "d"
+Sleep 200ms
+
+Type "f"
+Sleep 100ms
+Type "p"
+Sleep 100ms
+Type "m"
+Sleep 100ms
+Type "i"
+Sleep 200ms
+
+
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+Type "d"
+Sleep 10ms
+
+Type "q!"
 Enter
-Sleep 1200ms
