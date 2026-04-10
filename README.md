@@ -1,5 +1,7 @@
 # oxmap
 
+![demo](./demo/oxmap.gif)
+
 Terminal mind map and flowchart editor with Mermaid `.mmd` export.
 
 ## Commands
