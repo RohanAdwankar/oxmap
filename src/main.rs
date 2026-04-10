@@ -130,13 +130,13 @@ enum NoteColor {
 impl NoteColor {
     fn ratatui(self) -> Color {
         match self {
-            Self::Cyan => Color::Cyan,
-            Self::Yellow => Color::Yellow,
-            Self::Green => Color::Green,
-            Self::Magenta => Color::Magenta,
-            Self::Blue => Color::Blue,
-            Self::Red => Color::Red,
-            Self::White => Color::White,
+            Self::Cyan => Color::Indexed(116),
+            Self::Yellow => Color::Indexed(221),
+            Self::Green => Color::Indexed(114),
+            Self::Magenta => Color::Indexed(176),
+            Self::Blue => Color::Indexed(75),
+            Self::Red => Color::Indexed(210),
+            Self::White => Color::Indexed(231),
         }
     }
 
@@ -1290,7 +1290,7 @@ impl App {
 
     fn note_color(&self, note: &Note) -> Color {
         if self.monocolor {
-            Color::White
+            Color::Indexed(231)
         } else {
             note.color.ratatui()
         }
