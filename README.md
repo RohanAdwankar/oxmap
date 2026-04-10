@@ -9,7 +9,8 @@ Terminal mind map and flowchart editor with Mermaid `.mmd` export.
 | Key / Command | Action |
 | --- | --- |
 | `a` | Add a note and start editing it |
-| `f` then `<key>` | Select a note by key |
+| `f` then `<key>` | Select one note by key |
+| `<count>` then `f` then keys | Multi-select notes, e.g. `3fabc` |
 | `i` | Edit the selected note inline |
 | `o` | Open the selected note in your configured editor |
 | `x` | Delete the selected note |

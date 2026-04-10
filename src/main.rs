@@ -264,7 +264,7 @@ struct AppConfig {
 
 enum Mode {
     Normal,
-    AwaitSelect,
+    AwaitSelect(u16),
     AwaitRelationPrefix(RelationType),
     AwaitRelationTarget(RelationType),
     AwaitUnlinkPrefix,
@@ -288,7 +288,7 @@ enum EditField {
 struct App {
     notes: Vec<Note>,
     relations: Vec<Relation>,
-    selected: Option<usize>,
+    selected: Vec<char>,
     mode: Mode,
     camera_x: f32,
     camera_y: f32,
@@ -306,6 +306,59 @@ struct App {
 }
 
 impl App {
+    fn has_selection(&self) -> bool {
+        !self.selected.is_empty()
+    }
+
+    fn is_selected_key(&self, key: char) -> bool {
+        self.selected.contains(&key)
+    }
+
+    fn primary_selected_key(&self) -> Option<char> {
+        self.selected.first().copied()
+    }
+
+    fn primary_selected_index(&self) -> Option<usize> {
+        let key = self.primary_selected_key()?;
+        self.notes.iter().position(|note| note.key == key)
+    }
+
+    fn selected_indices(&self) -> Vec<usize> {
+        self.selected
+            .iter()
+            .filter_map(|key| self.notes.iter().position(|note| note.key == *key))
+            .collect()
+    }
+
+    fn selected_label(&self) -> String {
+        self.selected.iter().collect()
+    }
+
+    fn begin_select(&mut self, count: u16) {
+        self.selected.clear();
+        let target_count = count.max(1);
+        self.mode = Mode::AwaitSelect(target_count);
+        self.status = if target_count == 1 {
+            "select node by key".into()
+        } else {
+            format!("select {} nodes by key", target_count)
+        };
+    }
+
+    fn append_selected_key(&mut self, key: char) -> bool {
+        if self.selected.contains(&key) {
+            self.status = format!("already selected [{}]", key);
+            return false;
+        }
+        if self.notes.iter().any(|note| note.key == key) {
+            self.selected.push(key);
+            true
+        } else {
+            self.status = format!("unknown node key [{}]", key);
+            false
+        }
+    }
+
     fn load(args: Args) -> Result<Self> {
         let mut app = Self::demo();
         app.load_config()?;
@@ -332,7 +385,7 @@ impl App {
                 file_path: Some(PathBuf::from("nodes/a.md")),
             }],
             relations: vec![],
-            selected: Some(0),
+            selected: vec!['a'],
             mode: Mode::Edit(EditState {
                 field: EditField::Title,
                 title_cursor: 0,
@@ -376,7 +429,7 @@ impl App {
             }
             _ => bail!("unsupported file type for {}", path.display()),
         }
-        self.selected = None;
+        self.selected.clear();
         self.dirty = false;
         Ok(())
     }
@@ -405,48 +458,59 @@ impl App {
             return Ok(());
         }
 
-        match &mut self.mode {
-            Mode::AwaitSelect => {
-                if let KeyCode::Char(ch) = key.code {
-                    self.select_by_key(ch);
-                }
-                return Ok(());
-            }
-            Mode::AwaitRelationPrefix(kind) => {
-                if let KeyCode::Char('f') = key.code {
-                    let relation = *kind;
-                    self.mode = Mode::AwaitRelationTarget(relation);
-                    self.status = format!("relation {}: target key", relation.label());
+        if let Mode::AwaitSelect(remaining) = &self.mode {
+            let remaining = *remaining;
+            if let KeyCode::Char(ch) = key.code
+                && self.append_selected_key(ch)
+            {
+                let remaining = remaining.saturating_sub(1);
+                if remaining > 0 {
+                    self.mode = Mode::AwaitSelect(remaining);
+                    self.status = format!(
+                        "selected {}  need {} more",
+                        self.selected_label(),
+                        remaining
+                    );
                 } else {
-                    self.status = "relation expects f then target key".into();
                     self.mode = Mode::Normal;
+                    self.status = format!("selected {}", self.selected_label());
                 }
-                return Ok(());
             }
-            Mode::AwaitRelationTarget(kind) => {
-                if let KeyCode::Char(ch) = key.code {
-                    let relation = *kind;
-                    self.create_relation_to(ch, relation);
-                }
-                return Ok(());
+            return Ok(());
+        }
+        if let Mode::AwaitRelationPrefix(kind) = &self.mode {
+            if let KeyCode::Char('f') = key.code {
+                let relation = *kind;
+                self.mode = Mode::AwaitRelationTarget(relation);
+                self.status = format!("relation {}: target key", relation.label());
+            } else {
+                self.status = "relation expects f then target key".into();
+                self.mode = Mode::Normal;
             }
-            Mode::AwaitUnlinkPrefix => {
-                if let KeyCode::Char('f') = key.code {
-                    self.mode = Mode::AwaitUnlinkTarget;
-                    self.status = "unlink: target key".into();
-                } else {
-                    self.status = "unlink expects f then target key".into();
-                    self.mode = Mode::Normal;
-                }
-                return Ok(());
+            return Ok(());
+        }
+        if let Mode::AwaitRelationTarget(kind) = &self.mode {
+            if let KeyCode::Char(ch) = key.code {
+                let relation = *kind;
+                self.create_relation_to(ch, relation);
             }
-            Mode::AwaitUnlinkTarget => {
-                if let KeyCode::Char(ch) = key.code {
-                    self.remove_relation_to(ch);
-                }
-                return Ok(());
+            return Ok(());
+        }
+        if matches!(self.mode, Mode::AwaitUnlinkPrefix) {
+            if let KeyCode::Char('f') = key.code {
+                self.mode = Mode::AwaitUnlinkTarget;
+                self.status = "unlink: target key".into();
+            } else {
+                self.status = "unlink expects f then target key".into();
+                self.mode = Mode::Normal;
             }
-            Mode::Normal | Mode::Edit(_) | Mode::Command => {}
+            return Ok(());
+        }
+        if matches!(self.mode, Mode::AwaitUnlinkTarget) {
+            if let KeyCode::Char(ch) = key.code {
+                self.remove_relation_to(ch);
+            }
+            return Ok(());
         }
 
         if let KeyCode::Char(ch) = key.code
@@ -468,8 +532,7 @@ impl App {
             KeyCode::Char('a') => self.add_node(),
             KeyCode::Char('x') => self.delete_selected_note(),
             KeyCode::Char('f') => {
-                self.mode = Mode::AwaitSelect;
-                self.status = "select node by key".into();
+                self.begin_select(count);
             }
             KeyCode::Char('i') => self.start_edit(),
             KeyCode::Char('o') => self.open_selected_in_editor(terminal)?,
@@ -493,7 +556,7 @@ impl App {
     }
 
     fn handle_edit_key(&mut self, key: KeyEvent) -> Result<()> {
-        let Some(selected) = self.selected else {
+        let Some(selected) = self.primary_selected_index() else {
             self.mode = Mode::Normal;
             return Ok(());
         };
@@ -647,12 +710,12 @@ impl App {
     fn render_notes(&self, area: Rect, buf: &mut Buffer) {
         let mut clusters = vec![Cluster::default(); area.width as usize * area.height as usize];
 
-        for (index, note) in self.notes.iter().enumerate() {
+        for note in &self.notes {
             let projected = self.project_rect(note, area);
             if projected.w >= 8 && projected.h >= 5 {
-                self.render_note_box(note, projected, area, buf, self.selected == Some(index));
+                self.render_note_box(note, projected, area, buf, self.is_selected_key(note.key));
             } else {
-                self.add_cluster(note, area, &mut clusters, self.selected == Some(index));
+                self.add_cluster(note, area, &mut clusters, self.is_selected_key(note.key));
             }
         }
 
@@ -794,15 +857,27 @@ impl App {
     }
 
     fn render_status(&self, area: Rect, buf: &mut Buffer) {
-        let selection = self
-            .selected
-            .and_then(|idx| self.notes.get(idx))
-            .map(|note| format!("sel [{}] {}", note.key, note.title))
-            .unwrap_or_else(|| "pan".into());
+        let selection = if self.selected.is_empty() {
+            "pan".into()
+        } else if self.selected.len() == 1 {
+            self.primary_selected_index()
+                .and_then(|idx| self.notes.get(idx))
+                .map(|note| format!("sel [{}] {}", note.key, note.title))
+                .unwrap_or_else(|| "pan".into())
+        } else {
+            format!(
+                "sel [{}]",
+                self.selected
+                    .iter()
+                    .map(char::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        };
 
         let mode = match &self.mode {
             Mode::Normal => self.status.as_str(),
-            Mode::AwaitSelect => "awaiting node key",
+            Mode::AwaitSelect(_) => "awaiting node key",
             Mode::AwaitRelationPrefix(_) => "relation: press f then target key",
             Mode::AwaitRelationTarget(kind) => kind.label(),
             Mode::AwaitUnlinkPrefix => "unlink: press f then target key",
@@ -845,7 +920,7 @@ impl App {
         let Mode::Edit(state) = &self.mode else {
             return;
         };
-        let Some(selected) = self.selected else {
+        let Some(selected) = self.primary_selected_index() else {
             return;
         };
         let Some(note) = self.notes.get(selected) else {
@@ -901,7 +976,7 @@ impl App {
     }
 
     fn start_edit(&mut self) {
-        let Some(selected) = self.selected else {
+        let Some(selected) = self.primary_selected_index() else {
             self.status = "select a node first".into();
             return;
         };
@@ -917,16 +992,25 @@ impl App {
     fn apply_motion(&mut self, dx: f32, dy: f32, count: u16) {
         let repeat = max(1, count as i32) as f32;
         let step = self.movement_speed * repeat;
-        if let Some(selected) = self.selected {
-            let note_key = {
-                let note = &mut self.notes[selected];
-                note.x += dx * step;
-                note.y += dy * step;
-                note.key
-            };
+        let selected_indices = self.selected_indices();
+        if !selected_indices.is_empty() {
+            let moved_keys = selected_indices
+                .iter()
+                .map(|index| {
+                    let note = &mut self.notes[*index];
+                    note.x += dx * step;
+                    note.y += dy * step;
+                    note.key
+                })
+                .collect::<Vec<_>>();
             self.keep_selected_note_visible();
             self.dirty = true;
-            self.status = format!("moved [{}] by {},{}", note_key, dx * step, dy * step);
+            self.status = format!(
+                "moved [{}] by {},{}",
+                moved_keys.iter().collect::<String>(),
+                dx * step,
+                dy * step
+            );
         } else {
             self.camera_x += (dx * 4.0 * step) / self.zoom;
             self.camera_y += (dy * 2.5 * step) / self.zoom;
@@ -950,7 +1034,7 @@ impl App {
             color: NoteColor::cycle(index),
             file_path: Some(PathBuf::from(format!("nodes/{}.md", slugify_key(key)))),
         });
-        self.selected = Some(index);
+        self.selected = vec![key];
         self.mode = Mode::Edit(EditState {
             field: EditField::Title,
             title_cursor: 0,
@@ -960,34 +1044,25 @@ impl App {
         self.status = format!("added node [{}]", key);
     }
 
-    fn select_by_key(&mut self, key: char) {
-        if let Some(index) = self.notes.iter().position(|note| note.key == key) {
-            self.selected = Some(index);
-            self.mode = Mode::Normal;
-            self.status = format!("selected [{}] {}", key, self.notes[index].title);
-        } else {
-            self.mode = Mode::Normal;
-            self.status = format!("unknown node key [{}]", key);
-        }
-    }
-
     fn delete_selected_note(&mut self) {
-        let Some(selected) = self.selected else {
+        if !self.has_selection() {
             self.status = "select a node first".into();
             return;
-        };
+        }
 
-        let removed = self.notes.remove(selected);
-        self.relations
-            .retain(|relation| relation.from != removed.key && relation.to != removed.key);
-        self.selected = None;
+        let removed_keys = self.selected.clone();
+        self.notes.retain(|note| !removed_keys.contains(&note.key));
+        self.relations.retain(|relation| {
+            !removed_keys.contains(&relation.from) && !removed_keys.contains(&relation.to)
+        });
+        self.selected.clear();
         self.mode = Mode::Normal;
         self.dirty = true;
-        self.status = format!("deleted [{}]", removed.key);
+        self.status = format!("deleted [{}]", removed_keys.iter().collect::<String>());
     }
 
     fn begin_relation(&mut self, kind: RelationType) {
-        if self.selected.is_none() {
+        if !self.has_selection() {
             self.status = "select a source node first".into();
             return;
         }
@@ -996,7 +1071,7 @@ impl App {
     }
 
     fn begin_unlink(&mut self) {
-        if self.selected.is_none() {
+        if !self.has_selection() {
             self.status = "select a source node first".into();
             return;
         }
@@ -1005,49 +1080,51 @@ impl App {
     }
 
     fn create_relation_to(&mut self, key: char, kind: RelationType) {
-        let Some(selected) = self.selected else {
+        if !self.has_selection() {
             self.mode = Mode::Normal;
             return;
-        };
-        let from_key = self.notes[selected].key;
+        }
         if self.notes.iter().all(|note| note.key != key) {
             self.status = format!("unknown target [{}]", key);
             self.mode = Mode::Normal;
             return;
         }
-        self.relations.push(Relation {
-            from: from_key,
-            to: key,
-            kind,
-        });
+        let selected_keys = self.selected.clone();
+        for from_key in selected_keys {
+            self.relations.push(Relation {
+                from: from_key,
+                to: key,
+                kind,
+            });
+        }
         self.dirty = true;
         self.mode = Mode::Normal;
-        self.status = format!("linked [{}] -> [{}] ({})", from_key, key, kind.label());
+        self.status = format!("linked [{}] -> [{}] ({})", self.selected_label(), key, kind.label());
     }
 
     fn remove_relation_to(&mut self, key: char) {
-        let Some(selected) = self.selected else {
+        if !self.has_selection() {
             self.mode = Mode::Normal;
             return;
-        };
-        let from_key = self.notes[selected].key;
+        }
+        let selected_keys = self.selected.clone();
         let before = self.relations.len();
         self.relations
-            .retain(|relation| !(relation.from == from_key && relation.to == key));
+            .retain(|relation| !(selected_keys.contains(&relation.from) && relation.to == key));
         let removed = before.saturating_sub(self.relations.len());
         self.mode = Mode::Normal;
         if removed == 0 {
-            self.status = format!("no relation [{}] -> [{}]", from_key, key);
+            self.status = format!("no relation [{}] -> [{}]", self.selected_label(), key);
             return;
         }
         self.dirty = true;
-        self.status = format!("unlinked [{}] -> [{}]", from_key, key);
+        self.status = format!("unlinked [{}] -> [{}]", self.selected_label(), key);
     }
 
     fn cancel_pending(&mut self) {
         match self.mode {
             Mode::Normal => {
-                self.selected = None;
+                self.selected.clear();
                 self.status = "selection cleared".into();
             }
             _ => {
@@ -1097,7 +1174,7 @@ impl App {
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     ) -> Result<()> {
-        let Some(selected) = self.selected else {
+        let Some(selected) = self.primary_selected_index() else {
             self.status = "select a node first".into();
             return Ok(());
         };
@@ -1314,23 +1391,32 @@ impl App {
     }
 
     fn keep_selected_note_visible(&mut self) {
-        let Some(selected) = self.selected else {
+        let selected_indices = self.selected_indices();
+        if selected_indices.is_empty() {
             return;
-        };
+        }
         if self.last_canvas.width < 4 || self.last_canvas.height < 4 {
             return;
         }
-        let Some(note) = self.notes.get(selected) else {
-            return;
-        };
-
-        let projected = self.project_rect(note, self.last_canvas);
         let margin_x = 2;
         let margin_y = 1;
-        let left = projected.x;
-        let right = projected.x + projected.w;
-        let top = projected.y;
-        let bottom = projected.y + projected.h;
+        let mut left = i32::MAX;
+        let mut right = i32::MIN;
+        let mut top = i32::MAX;
+        let mut bottom = i32::MIN;
+        for selected in selected_indices {
+            let Some(note) = self.notes.get(selected) else {
+                continue;
+            };
+            let projected = self.project_rect(note, self.last_canvas);
+            left = left.min(projected.x);
+            right = right.max(projected.x + projected.w);
+            top = top.min(projected.y);
+            bottom = bottom.max(projected.y + projected.h);
+        }
+        if left == i32::MAX {
+            return;
+        }
         let min_x = margin_x;
         let max_x = self.last_canvas.width as i32 - margin_x;
         let min_y = margin_y;
@@ -1898,7 +1984,7 @@ mod tests {
             color: NoteColor::White,
             file_path: None,
         }];
-        app.selected = Some(0);
+        app.selected = vec!['a'];
         app.last_canvas = Rect::new(0, 0, 40, 20);
         app.zoom = 1.0;
         app.camera_x = 0.0;
@@ -1943,14 +2029,14 @@ mod tests {
             to: 'b',
             kind: RelationType::Directional,
         }];
-        app.selected = Some(0);
+        app.selected = vec!['a'];
 
         app.delete_selected_note();
 
         assert_eq!(app.notes.len(), 1);
         assert_eq!(app.notes[0].key, 'b');
         assert!(app.relations.is_empty());
-        assert!(app.selected.is_none());
+        assert!(app.selected.is_empty());
     }
 
     #[test]
@@ -2003,7 +2089,7 @@ mod tests {
                 kind: RelationType::Directional,
             },
         ];
-        app.selected = Some(0);
+        app.selected = vec!['a'];
 
         app.remove_relation_to('b');
 
